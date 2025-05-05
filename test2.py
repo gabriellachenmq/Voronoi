@@ -11,7 +11,7 @@ import matplotlib.patches as mpatches
 class VoronoiGenerator:
     def __init__(self, root):
         self.root = root
-        self.root.title("CVT Generator with Lloyd's Algorithm (Shapely)")
+        self.root.title("CVT Generator with Lloyd's Algorithm")
 
         # Points storage
         self.points = []
