@@ -165,7 +165,7 @@ class VoronoiGenerator:
             simplex = np.asarray(simplex)
             if np.any(simplex < 0):  # Infinite ridge
                 i = simplex[simplex >= 0][0]  # Finite end
-                p1, p2 = self.vor.points[pointidx]
+                p1, p2 = self.vor.points[pointidx] # Get the two points defining this ridge
 
                 # Calculate direction vector
                 t = p2 - p1
@@ -215,8 +215,8 @@ class VoronoiGenerator:
             messagebox.showwarning("Warning", "Please generate a Voronoi diagram first")
             return
 
-        max_iterations = 50
-        tolerance = 1.0  # Convergence threshold
+        max_iterations = 100
+        tolerance = 1e-6  # Convergence threshold
         prev_centroids = self.vor.points.copy()
 
         for _ in range(max_iterations):
