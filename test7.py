@@ -15,7 +15,7 @@ class VoronoiGenerator:
         self.points = []
         self.original_points = []
         self.vor = None
-        self.original_vor = None  # Store original Voronoi diagram
+        self.original_vor = None
         self.centroids = None
         self.iteration_count = 0
         self.auto_running = False
@@ -42,7 +42,7 @@ class VoronoiGenerator:
         self.auto_lloyd_button.pack(fill=tk.X, pady=5)
 
         self.show_original_button = tk.Button(self.button_frame, text="Show Original Points",
-                                              command=self.show_original_points)
+                                            command=self.show_original_points)
         self.show_original_button.pack(fill=tk.X, pady=5)
 
         self.info_label = tk.Label(self.button_frame, text="Iterations: 0")
@@ -54,6 +54,8 @@ class VoronoiGenerator:
         self.canvas = None
 
         self.bounds = [0, 600, 0, 400]
+        self.width = self.bounds[1] - self.bounds[0]
+        self.height = self.bounds[3] - self.bounds[2]
 
     def add_point(self, event):
         x, y = event.x, event.y
@@ -76,23 +78,57 @@ class VoronoiGenerator:
             self.ax.clear()
 
     def add_mirror_points(self, points):
+        """Add geometrically mirrored points across each boundary"""
         if len(points) == 0:
             return points
 
         points = np.array(points)
-        width = self.bounds[1] - self.bounds[0]
-        height = self.bounds[3] - self.bounds[2]
-
-        mirror_offsets = [
-            (-width, 0), (width, 0),
-            (0, -height), (0, height),
-            (-width, -height), (-width, height),
-            (width, -height), (width, height),
-        ]
-
         mirrored = []
-        for dx, dy in mirror_offsets:
-            mirrored.extend(points + np.array([dx, dy]))
+
+        # Mirror across left boundary (x=0)
+        left_mirror = np.copy(points)
+        left_mirror[:, 0] = -left_mirror[:, 0]
+        mirrored.append(left_mirror)
+
+        # Mirror across right boundary (x=width)
+        right_mirror = np.copy(points)
+        right_mirror[:, 0] = 2 * self.width - right_mirror[:, 0]
+        mirrored.append(right_mirror)
+
+        # Mirror across bottom boundary (y=0)
+        bottom_mirror = np.copy(points)
+        bottom_mirror[:, 1] = -bottom_mirror[:, 1]
+        mirrored.append(bottom_mirror)
+
+        # Mirror across top boundary (y=height)
+        top_mirror = np.copy(points)
+        top_mirror[:, 1] = 2 * self.height - top_mirror[:, 1]
+        mirrored.append(top_mirror)
+
+        # Mirror across corners (combinations of above)
+        # Bottom-left corner
+        bl_mirror = np.copy(points)
+        bl_mirror[:, 0] = -bl_mirror[:, 0]
+        bl_mirror[:, 1] = -bl_mirror[:, 1]
+        mirrored.append(bl_mirror)
+
+        # Top-left corner
+        tl_mirror = np.copy(points)
+        tl_mirror[:, 0] = -tl_mirror[:, 0]
+        tl_mirror[:, 1] = 2 * self.height - tl_mirror[:, 1]
+        mirrored.append(tl_mirror)
+
+        # Bottom-right corner
+        br_mirror = np.copy(points)
+        br_mirror[:, 0] = 2 * self.width - br_mirror[:, 0]
+        br_mirror[:, 1] = -br_mirror[:, 1]
+        mirrored.append(br_mirror)
+
+        # Top-right corner
+        tr_mirror = np.copy(points)
+        tr_mirror[:, 0] = 2 * self.width - tr_mirror[:, 0]
+        tr_mirror[:, 1] = 2 * self.height - tr_mirror[:, 1]
+        mirrored.append(tr_mirror)
 
         return np.vstack([points] + mirrored)
 
@@ -101,7 +137,6 @@ class VoronoiGenerator:
             messagebox.showwarning("Warning", "You need at least 2 points to generate a Voronoi diagram")
             return
 
-        # If we already have an original Voronoi diagram, restore it
         if self.original_vor is not None:
             self.vor = copy.deepcopy(self.original_vor)
             self.points = np.array(self.original_points)
@@ -110,11 +145,10 @@ class VoronoiGenerator:
             self.plot_voronoi()
             return
 
-        # Otherwise generate new Voronoi diagram
         self.points = np.array(self.points)
         all_points = self.add_mirror_points(self.points)
         self.vor = Voronoi(all_points)
-        self.original_vor = copy.deepcopy(self.vor)  # Store original state
+        self.original_vor = copy.deepcopy(self.vor)
         self.centroids = None
         self.iteration_count = 0
         self.info_label.config(text="Iterations: 0")
