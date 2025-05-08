@@ -46,7 +46,7 @@ class VoronoiGenerator:
         self.auto_lloyd_button = tk.Button(self.button_frame, text="Auto Lloyd to CVT", command=self.auto_lloyd)
         self.auto_lloyd_button.pack(fill=tk.X, pady=5)
 
-        self.show_original_button = tk.Button(self.button_frame, text="Toggle Original Points",
+        self.show_original_button = tk.Button(self.button_frame, text="Show Original Points",
                                               command=self.toggle_original_points)
         self.show_original_button.pack(fill=tk.X, pady=5)
 
