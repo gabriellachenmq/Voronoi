@@ -58,10 +58,11 @@ class VoronoiGenerator:
         self.height = self.bounds[3] - self.bounds[2]
 
     def add_point(self, event):
-        x, y = event.x, event.y
+        x, y = event.x, self.height - event.y  # Convert y-coordinate here
         self.points.append((x, y))
         self.original_points.append((x, y))
-        self.click_canvas.create_oval(x - 3, y - 3, x + 3, y + 3, fill='red')
+        # Draw on tkinter canvas using original coordinates
+        self.click_canvas.create_oval(event.x - 3, event.y - 3, event.x + 3, event.y + 3, fill='red')
 
     def clear_points(self):
         self.points = []
