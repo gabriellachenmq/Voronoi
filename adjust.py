@@ -4,9 +4,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from scipy.spatial import Voronoi
-from shapely.geometry import Polygon, MultiPolygon, Point
+from shapely.geometry import Polygon
 import copy
-
 
 class VoronoiGenerator:
     def __init__(self, root):
@@ -20,8 +19,9 @@ class VoronoiGenerator:
         self.centroids = None
         self.iteration_count = 0
         self.auto_running = False
-        self.fixed_point_index = None  # Index of the point we want to fix
-        self.drift_correction_enabled = False  # Flag for drift correction
+
+        self.selected_point_A_index = None  # Index of the fixed special point A
+        self.select_point_A_mode = False    # Are we in "Select Point A" mode?
 
         self.main_frame = tk.Frame(self.root)
         self.main_frame.pack(fill=tk.BOTH, expand=True)
@@ -45,17 +45,17 @@ class VoronoiGenerator:
         self.auto_lloyd_button.pack(fill=tk.X, pady=5)
 
         self.show_original_button = tk.Button(self.button_frame, text="Show Original Points",
-                                              command=self.show_original_points)
+                                            command=self.show_original_points)
         self.show_original_button.pack(fill=tk.X, pady=5)
 
-        self.fix_center_button = tk.Button(self.button_frame, text="Fix Central Point",
-                                           command=self.toggle_fix_center)
-        self.fix_center_button.pack(fill=tk.X, pady=5)
+        # New Button to toggle select point A mode
+        self.select_point_A_button = tk.Button(self.button_frame, text="Select Point A", command=self.toggle_select_point_A)
+        self.select_point_A_button.pack(fill=tk.X, pady=5)
 
         self.info_label = tk.Label(self.button_frame, text="Iterations: 0")
         self.info_label.pack(fill=tk.X, pady=5)
 
-        self.click_canvas.bind("<Button-1>", self.add_point)
+        self.click_canvas.bind("<Button-1>", self.on_canvas_click)
 
         self.fig, self.ax = plt.subplots(figsize=(6, 4))
         self.canvas = None
@@ -64,12 +64,145 @@ class VoronoiGenerator:
         self.width = self.bounds[1] - self.bounds[0]
         self.height = self.bounds[3] - self.bounds[2]
 
+    def toggle_select_point_A(self):
+        self.select_point_A_mode = not self.select_point_A_mode
+        if self.select_point_A_mode:
+            self.select_point_A_button.config(relief=tk.SUNKEN)
+            messagebox.showinfo("Select Point A", "Click near a point to select it as Point A (green).")
+        else:
+            self.select_point_A_button.config(relief=tk.RAISED)
+
+    def on_canvas_click(self, event):
+        if self.select_point_A_mode:
+            # Try to select a point near the click as Point A
+            click_x, click_y = event.x, self.height - event.y
+            if len(self.points) == 0:
+                messagebox.showwarning("Warning", "No points to select.")
+                return
+
+            points_arr = np.array(self.points)
+            distances = np.linalg.norm(points_arr - np.array([click_x, click_y]), axis=1)
+            closest_index = np.argmin(distances)
+            if distances[closest_index] < 15:  # pixel threshold for selecting a point
+                self.selected_point_A_index = closest_index
+                self.select_point_A_mode = False
+                self.select_point_A_button.config(relief=tk.RAISED)
+                self.plot_voronoi()
+                messagebox.showinfo("Point A Selected", f"Selected point {closest_index} as Point A.")
+            else:
+                messagebox.showwarning("Warning", "Click closer to an existing point to select Point A.")
+        else:
+            # Normal adding point mode
+            self.add_point(event)
+
     def add_point(self, event):
         x, y = event.x, self.height - event.y  # Convert y-coordinate here
         self.points.append((x, y))
         self.original_points.append((x, y))
-        # Draw on tkinter canvas using original coordinates
         self.click_canvas.create_oval(event.x - 3, event.y - 3, event.x + 3, event.y + 3, fill='red')
+
+    # ... (keep your existing methods unchanged here) ...
+
+    def plot_voronoi(self, show_original=False):
+        self.ax.clear()
+        bounding_box = Polygon([
+            (self.bounds[0], self.bounds[2]),
+            (self.bounds[1], self.bounds[2]),
+            (self.bounds[1], self.bounds[3]),
+            (self.bounds[0], self.bounds[3])
+        ])
+
+        for i, region_index in enumerate(self.vor.point_region[:len(self.points)]):
+            region = self.vor.regions[region_index]
+            if -1 in region or len(region) == 0:
+                continue
+            polygon = Polygon(self.vor.vertices[region])
+            clipped = polygon.intersection(bounding_box)
+            if clipped.is_empty:
+                continue
+            if clipped.geom_type == 'Polygon':
+                self.ax.fill(*clipped.exterior.xy, alpha=0.4)
+            elif clipped.geom_type == 'MultiPolygon':
+                for p in clipped.geoms:
+                    self.ax.fill(*p.exterior.xy, alpha=0.4)
+
+        pts = np.array(self.points)
+        # Draw all points in red
+        self.ax.plot(pts[:, 0], pts[:, 1], 'ro', label='Current Points')
+
+        # Highlight point A in green if selected
+        if self.selected_point_A_index is not None and 0 <= self.selected_point_A_index < len(self.points):
+            a_pt = pts[self.selected_point_A_index]
+            self.ax.plot(a_pt[0], a_pt[1], 'go', markersize=10, label='Point A')
+
+        if show_original:
+            original = np.array(self.original_points)
+            self.ax.plot(original[:, 0], original[:, 1], 'bo', label='Original Points')
+
+        self.ax.set_xlim(self.bounds[0], self.bounds[1])
+        self.ax.set_ylim(self.bounds[2], self.bounds[3])
+        self.ax.set_title(f"Voronoi Diagram (Iteration: {self.iteration_count})")
+        self.ax.legend()
+
+        if self.canvas:
+            self.canvas.get_tk_widget().destroy()
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self.click_canvas)
+        self.canvas.draw()
+        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        self.click_canvas.delete("all")
+
+    def apply_lloyd(self):
+        if self.vor is None:
+            messagebox.showwarning("Warning", "Generate the Voronoi diagram first.")
+            return
+
+        centroids = self.calculate_centroids()
+        centroids = np.array(centroids)
+
+        # If Point A is selected
+        if self.selected_point_A_index is not None:
+            A_idx = self.selected_point_A_index
+
+            neighbors = self.get_voronoi_neighbors(A_idx)
+
+            if len(neighbors) > 0:
+                neighbor_points = [self.points[i] for i in neighbors]
+
+                try:
+                    from scipy.spatial import ConvexHull
+                    hull = ConvexHull(neighbor_points)
+                    polygon_points = neighbor_points[hull.vertices]
+                except Exception:
+                    polygon_points = neighbor_points
+
+                polygon = Polygon(polygon_points)
+                if not polygon.is_valid or polygon.is_empty:
+                    centroid_P = centroids[A_idx]
+                else:
+                    centroid_P = np.array([polygon.centroid.x, polygon.centroid.y])
+
+                # Soft constraint update for point A with lambda=0.5
+                lambda_ = 0.5
+                centroids[A_idx] = (1 - lambda_) * centroids[A_idx] + lambda_ * centroid_P
+
+        all_points = self.add_mirror_points(centroids)
+        self.vor = Voronoi(all_points)
+        self.points = centroids.copy()
+        self.iteration_count += 1
+        self.info_label.config(text=f"Iterations: {self.iteration_count}")
+        self.plot_voronoi()
+
+    def get_voronoi_neighbors(self, point_index):
+        neighbors = set()
+        ridge_points = self.vor.ridge_points
+        for (p1, p2) in ridge_points:
+            if p1 == point_index:
+                neighbors.add(p2)
+            elif p2 == point_index:
+                neighbors.add(p1)
+        return list(neighbors)
+
+    # The rest of your unchanged methods below...
 
     def clear_points(self):
         self.points = []
@@ -79,25 +212,14 @@ class VoronoiGenerator:
         self.centroids = None
         self.iteration_count = 0
         self.auto_running = False
-        self.fixed_point_index = None
+        self.selected_point_A_index = None
+        self.select_point_A_mode = False
+        self.select_point_A_button.config(relief=tk.RAISED)
         self.info_label.config(text="Iterations: 0")
         self.click_canvas.delete("all")
         if self.canvas:
             self.canvas.get_tk_widget().destroy()
             self.ax.clear()
-
-    def toggle_fix_center(self):
-        self.drift_correction_enabled = not self.drift_correction_enabled
-        if self.drift_correction_enabled:
-            self.fix_center_button.config(text="Fix Central Point: ON")
-            if len(self.points) > 0:
-                # Find the most central point (closest to center of bounds)
-                center = np.array([self.width / 2, self.height / 2])
-                distances = np.linalg.norm(np.array(self.points) - center, axis=1)
-                self.fixed_point_index = np.argmin(distances)
-        else:
-            self.fix_center_button.config(text="Fix Central Point: OFF")
-            self.fixed_point_index = None
 
     def add_mirror_points(self, points):
         if len(points) == 0:
@@ -126,262 +248,71 @@ class VoronoiGenerator:
         top_mirror[:, 1] = 2 * self.height - top_mirror[:, 1]
         mirrored.append(top_mirror)
 
-        # corners (combinations of above)
-        # Bottom-left corner
-        bl_mirror = np.copy(points)
-        bl_mirror[:, 0] = -bl_mirror[:, 0]
-        bl_mirror[:, 1] = -bl_mirror[:, 1]
-        mirrored.append(bl_mirror)
+        # Combine original + mirrors
+        all_points = np.vstack([points] + mirrored)
+        return all_points
 
-        # Top-left corner
-        tl_mirror = np.copy(points)
-        tl_mirror[:, 0] = -tl_mirror[:, 0]
-        tl_mirror[:, 1] = 2 * self.height - tl_mirror[:, 1]
-        mirrored.append(tl_mirror)
-
-        # Bottom-right corner
-        br_mirror = np.copy(points)
-        br_mirror[:, 0] = 2 * self.width - br_mirror[:, 0]
-        br_mirror[:, 1] = -br_mirror[:, 1]
-        mirrored.append(br_mirror)
-
-        # Top-right corner
-        tr_mirror = np.copy(points)
-        tr_mirror[:, 0] = 2 * self.width - tr_mirror[:, 0]
-        tr_mirror[:, 1] = 2 * self.height - tr_mirror[:, 1]
-        mirrored.append(tr_mirror)
-
-        return np.vstack([points] + mirrored)
-
-    def generate_voronoi(self):
-        if len(self.points) < 2:
-            messagebox.showwarning("Warning", "You need at least 2 points to generate a Voronoi diagram")
-            return
-
-        if self.original_vor is not None:
-            self.vor = copy.deepcopy(self.original_vor)
-            self.points = np.array(self.original_points)
-            self.iteration_count = 0
-            self.info_label.config(text="Iterations: 0")
-            self.plot_voronoi()
-            return
-
-        self.points = np.array(self.points)
-        all_points = self.add_mirror_points(self.points)
-        self.vor = Voronoi(all_points)
-        self.original_vor = copy.deepcopy(self.vor)
-        self.centroids = None
-        self.iteration_count = 0
-        self.info_label.config(text="Iterations: 0")
-
-        self.plot_voronoi()
-
-    def plot_voronoi(self, show_original=False):
-        self.ax.clear()
+    def calculate_centroids(self):
+        centroids = []
         bounding_box = Polygon([
             (self.bounds[0], self.bounds[2]),
             (self.bounds[1], self.bounds[2]),
             (self.bounds[1], self.bounds[3]),
             (self.bounds[0], self.bounds[3])
         ])
-
         for i, region_index in enumerate(self.vor.point_region[:len(self.points)]):
             region = self.vor.regions[region_index]
             if -1 in region or len(region) == 0:
+                centroids.append(self.points[i])  # fallback: keep old position
                 continue
             polygon = Polygon(self.vor.vertices[region])
             clipped = polygon.intersection(bounding_box)
             if clipped.is_empty:
-                continue
-            if clipped.geom_type == 'Polygon':
-                self.ax.fill(*clipped.exterior.xy, alpha=0.4)
-            elif clipped.geom_type == 'MultiPolygon':
-                for p in clipped.geoms:
-                    self.ax.fill(*p.exterior.xy, alpha=0.4)
-
-        # Highlight the fixed point if it exists
-        if self.fixed_point_index is not None and len(self.points) > self.fixed_point_index:
-            self.ax.plot(self.points[self.fixed_point_index, 0],
-                         self.points[self.fixed_point_index, 1],
-                         'go', markersize=8, label='Fixed Point')
-
-        self.ax.plot(self.points[:, 0], self.points[:, 1], 'ro', label='Current Points')
-        if show_original:
-            original = np.array(self.original_points)
-            self.ax.plot(original[:, 0], original[:, 1], 'bo', label='Original Points')
-
-        self.ax.set_xlim(self.bounds[0], self.bounds[1])
-        self.ax.set_ylim(self.bounds[2], self.bounds[3])
-        self.ax.set_title(f"Voronoi Diagram (Iteration: {self.iteration_count})")
-        self.ax.legend()
-
-        if self.canvas:
-            self.canvas.get_tk_widget().destroy()
-        self.canvas = FigureCanvasTkAgg(self.fig, master=self.click_canvas)
-        self.canvas.draw()
-        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        self.click_canvas.delete("all")
-
-    def get_level1_neighbors(self, point_index):
-        """Find the indices of level 1 neighbors (cells that share an edge with the fixed point's cell)"""
-        if self.vor is None or point_index >= len(self.points):
-            return []
-
-        # Get the ridge points (pairs of point indices that share a ridge/edge)
-        ridge_points = []
-        for ridge in self.vor.ridge_points:
-            if point_index in ridge:
-                other_point = ridge[1] if ridge[0] == point_index else ridge[0]
-                if other_point < len(self.points):  # Only consider real points (not mirrored ones)
-                    ridge_points.append(other_point)
-
-        return list(set(ridge_points))  # Remove duplicates
-
-    def calculate_polygon_p_centroid(self, point_index):
-        """Calculate the centroid of the polygon formed by level 1 neighbors"""
-        neighbors = self.get_level1_neighbors(point_index)
-        if len(neighbors) < 3:
-            return None  # Not enough points to form a polygon
-
-        # Get the coordinates of the neighbors
-        neighbor_points = self.points[neighbors]
-
-        # Create a polygon from these points and calculate its centroid
-        try:
-            polygon = Polygon(neighbor_points)
-            if polygon.is_valid:
-                return np.array([polygon.centroid.x, polygon.centroid.y])
-        except:
-            pass
-
-        return None
-
-    def apply_lloyd(self):
-        if self.vor is None:
-            messagebox.showwarning("Warning", "Generate the Voronoi diagram first.")
-            return
-
-        self.centroids = self.calculate_centroids()
-
-        if self.drift_correction_enabled and self.fixed_point_index is not None:
-            # Calculate the centroid of polygon P (formed by level 1 neighbors)
-            polygon_p_centroid = self.calculate_polygon_p_centroid(self.fixed_point_index)
-
-            if polygon_p_centroid is not None:
-                # Calculate displacement vector
-                displacement = polygon_p_centroid - self.centroids[self.fixed_point_index]
-
-                # Adjust the neighbors to compensate for this displacement
-                neighbors = self.get_level1_neighbors(self.fixed_point_index)
-                if neighbors:
-                    # Distribute the adjustment among neighbors
-                    adjustment = -displacement / len(neighbors)
-                    for neighbor_idx in neighbors:
-                        self.centroids[neighbor_idx] += adjustment * 0.5  # Dampen the adjustment
-
-        all_points = self.add_mirror_points(self.centroids)
-        self.vor = Voronoi(all_points)
-        self.points = self.centroids.copy()
-        self.iteration_count += 1
-        self.info_label.config(text=f"Iterations: {self.iteration_count}")
-        self.plot_voronoi()
-
-    def auto_lloyd(self):
-        if self.vor is None:
-            messagebox.showwarning("Warning", "Generate the Voronoi diagram first.")
-            return
-
-        if self.auto_running:
-            self.auto_running = False
-            self.auto_lloyd_button.config(text="Auto CVT")
-            return
-        else:
-            self.auto_running = True
-            self.auto_lloyd_button.config(text="Stop Auto CVT")
-            self.auto_previous_points = self.points.copy()
-            self.auto_iterations = 0
-            self.auto_max_iterations = 100
-            self.auto_tolerance = 1e-3
-            self.root.after(10, self.auto_lloyd_iteration)
-
-    def auto_lloyd_iteration(self):
-        if not self.auto_running or self.auto_iterations >= self.auto_max_iterations:
-            self.auto_running = False
-            self.auto_lloyd_button.config(text="Auto CVT")
-            return
-
-        centroids = self.calculate_centroids()
-
-        if self.drift_correction_enabled and self.fixed_point_index is not None:
-            # Calculate the centroid of polygon P (formed by level 1 neighbors)
-            polygon_p_centroid = self.calculate_polygon_p_centroid(self.fixed_point_index)
-
-            if polygon_p_centroid is not None:
-                # Calculate displacement vector
-                displacement = polygon_p_centroid - centroids[self.fixed_point_index]
-
-                # Adjust the neighbors to compensate for this displacement
-                neighbors = self.get_level1_neighbors(self.fixed_point_index)
-                if neighbors:
-                    # Distribute the adjustment among neighbors
-                    adjustment = -displacement / len(neighbors)
-                    for neighbor_idx in neighbors:
-                        centroids[neighbor_idx] += adjustment * 0.5  # Dampen the adjustment
-
-        movement = np.linalg.norm(self.auto_previous_points - centroids)
-
-        if movement < self.auto_tolerance:
-            self.auto_running = False
-            self.auto_lloyd_button.config(text="Auto CVT")
-            return
-
-        all_points = self.add_mirror_points(centroids)
-        self.vor = Voronoi(all_points)
-        self.points = centroids.copy()
-        self.auto_previous_points = centroids.copy()
-        self.iteration_count += 1
-        self.auto_iterations += 1
-        self.info_label.config(text=f"Iterations: {self.iteration_count}")
-        self.plot_voronoi()
-
-        self.root.after(10, self.auto_lloyd_iteration)
-
-    def calculate_centroids(self):
-        num_real = len(self.points)
-        centroids = np.zeros((num_real, 2))
-
-        bounding_box = Polygon([
-            (self.bounds[0], self.bounds[2]),
-            (self.bounds[1], self.bounds[2]),
-            (self.bounds[1], self.bounds[3]),
-            (self.bounds[0], self.bounds[3])
-        ])
-
-        for i in range(num_real):
-            region_index = self.vor.point_region[i]
-            region = self.vor.regions[region_index]
-
-            if -1 in region or len(region) == 0:
-                centroids[i] = self.points[i]
-                continue
-
-            polygon = Polygon(self.vor.vertices[region])
-            clipped = polygon.intersection(bounding_box)
-            if clipped.is_empty:
-                centroids[i] = self.points[i]
+                centroids.append(self.points[i])  # fallback
             else:
-                c = clipped.centroid
-                centroids[i] = [c.x, c.y]
+                centroids.append(np.array([clipped.centroid.x, clipped.centroid.y]))
         return centroids
 
+    def generate_voronoi(self):
+        if len(self.points) < 2:
+            messagebox.showwarning("Warning", "Add at least two points to generate Voronoi diagram.")
+            return
+        points_arr = np.array(self.points)
+        all_points = self.add_mirror_points(points_arr)
+        self.vor = Voronoi(all_points)
+        self.iteration_count = 0
+        self.info_label.config(text="Iterations: 0")
+        self.plot_voronoi()
+
     def show_original_points(self):
-        if self.vor is None:
-            messagebox.showwarning("Warning", "Generate the Voronoi diagram first.")
+        if len(self.original_points) == 0:
+            messagebox.showwarning("Warning", "No original points to show.")
             return
         self.plot_voronoi(show_original=True)
 
+    def auto_lloyd(self):
+        if self.auto_running:
+            self.auto_running = False
+            self.auto_lloyd_button.config(text="Auto CVT")
+        else:
+            if self.vor is None:
+                messagebox.showwarning("Warning", "Generate Voronoi diagram first.")
+                return
+            self.auto_running = True
+            self.auto_lloyd_button.config(text="Stop Auto CVT")
+            self.run_auto_lloyd()
 
-if __name__ == "__main__":
+    def run_auto_lloyd(self):
+        if not self.auto_running:
+            return
+        self.apply_lloyd()
+        self.root.after(500, self.run_auto_lloyd)
+
+
+def main():
     root = tk.Tk()
     app = VoronoiGenerator(root)
     root.mainloop()
+
+if __name__ == "__main__":
+    main()
