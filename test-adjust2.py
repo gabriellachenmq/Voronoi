@@ -7,6 +7,7 @@ from scipy.spatial import Voronoi
 from shapely.geometry import Polygon, MultiPolygon
 import copy
 
+
 class VoronoiGenerator:
     def __init__(self, root):
         self.root = root
@@ -19,6 +20,7 @@ class VoronoiGenerator:
         self.centroids = None
         self.iteration_count = 0
         self.auto_running = False
+        self.auto_previous_points = None  # To track movement between iterations
 
         self.fixed_point_mode = False
         self.fixed_point_index = None
@@ -32,7 +34,8 @@ class VoronoiGenerator:
         self.button_frame = tk.Frame(self.main_frame)
         self.button_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=5, pady=5)
 
-        self.select_fixed_button = tk.Button(self.button_frame, text="Select Point A (Off)", command=self.toggle_fixed_point_mode)
+        self.select_fixed_button = tk.Button(self.button_frame, text="Select Point A (Off)",
+                                             command=self.toggle_fixed_point_mode)
         self.select_fixed_button.pack(fill=tk.X, pady=5)
 
         self.clear_button = tk.Button(self.button_frame, text="Clear Points", command=self.clear_points)
@@ -44,10 +47,11 @@ class VoronoiGenerator:
         self.lloyd_button = tk.Button(self.button_frame, text="Lloyd's Algorithm", command=self.apply_lloyd)
         self.lloyd_button.pack(fill=tk.X, pady=5)
 
-        self.auto_lloyd_button = tk.Button(self.button_frame, text="Auto CVT", command=self.apply_lloyd)
+        self.auto_lloyd_button = tk.Button(self.button_frame, text="Auto CVT", command=self.auto_lloyd)
         self.auto_lloyd_button.pack(fill=tk.X, pady=5)
 
-        self.show_original_button = tk.Button(self.button_frame, text="Show Original Points", command=self.show_original_points)
+        self.show_original_button = tk.Button(self.button_frame, text="Show Original Points",
+                                              command=self.show_original_points)
         self.show_original_button.pack(fill=tk.X, pady=5)
 
         self.info_label = tk.Label(self.button_frame, text="Iterations: 0")
@@ -87,6 +91,7 @@ class VoronoiGenerator:
         self.iteration_count = 0
         self.auto_running = False
         self.fixed_point_index = None
+        self.auto_previous_points = None
         self.info_label.config(text="Iterations: 0")
         self.click_canvas.delete("all")
         if self.canvas:
@@ -149,6 +154,7 @@ class VoronoiGenerator:
         self.original_vor = copy.deepcopy(self.vor)
         self.centroids = None
         self.iteration_count = 0
+        self.auto_previous_points = None
         self.info_label.config(text="Iterations: 0")
 
         self.plot_voronoi()
@@ -191,7 +197,6 @@ class VoronoiGenerator:
         self.canvas.draw()
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
-
     def apply_lloyd(self):
         if self.vor is None:
             messagebox.showwarning("Warning", "Generate the Voronoi diagram first.")
@@ -207,15 +212,49 @@ class VoronoiGenerator:
                     poly_centroid = np.mean(neighbor_points, axis=0)
                     lambda_ = 0.5
                     centroids[self.fixed_point_index] = (
-                        (1 - lambda_) * centroids[self.fixed_point_index] + lambda_ * poly_centroid
+                            (1 - lambda_) * centroids[self.fixed_point_index] + lambda_ * poly_centroid
                     )
 
+        self.auto_previous_points = np.array(self.points)  # Store current points before updating
         self.points = centroids
         self.vor = Voronoi(self.add_mirror_points(self.points))
         self.iteration_count += 1
         self.info_label.config(text=f"Iterations: {self.iteration_count}")
         self.plot_voronoi()
 
+    def auto_lloyd(self):
+        if self.vor is None:
+            messagebox.showwarning("Warning", "Generate the Voronoi diagram first.")
+            return
+
+        if self.auto_running:
+            self.auto_running = False
+            self.auto_lloyd_button.config(text="Auto CVT")
+            return
+
+        self.auto_running = True
+        self.auto_lloyd_button.config(text="Stop CVT")
+        self.auto_tolerance = 1e-3
+        self.run_auto_lloyd()
+
+    def run_auto_lloyd(self):
+        if not self.auto_running:
+            return
+
+        current_points = np.array(self.points)
+
+        self.apply_lloyd()
+
+        if self.auto_previous_points is not None:
+            movement = np.linalg.norm(self.auto_previous_points - self.points)
+
+            if movement < self.auto_tolerance:
+                self.auto_running = False
+                self.auto_lloyd_button.config(text="Auto CVT")
+                return
+
+        # Schedule next iteration
+        self.root.after(100, self.run_auto_lloyd)
 
     def get_voronoi_neighbors(self, idx):
         neighbors = set()
@@ -252,6 +291,7 @@ class VoronoiGenerator:
 
     def show_original_points(self):
         self.plot_voronoi()
+
 
 if __name__ == "__main__":
     root = tk.Tk()
