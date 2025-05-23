@@ -247,56 +247,77 @@ class VoronoiGenerator:
 
         if self.fixed_point_index is not None:
             # Get separate polygons for each level (up to 3 levels)
-            level_polygons = self.get_neighborhood_polygons(self.fixed_point_index, 5)
-
-            # Get the Lloyd-updated position first
-            lloyd_centroid = centroids[self.fixed_point_index]
+            level_polygons = self.get_neighborhood_polygons(self.fixed_point_index, 3)
 
             if level_polygons:
-                # Calculate centroids for each level's polygon
-                level_centroids = [poly.centroid for level, poly in level_polygons]
+                # Extract centroids for each level (sorted from highest to lowest level)
+                level_centroids = [poly.centroid for _, poly in reversed(level_polygons)]
 
-                # Calculate centroid of all level centroids
-                from shapely.geometry import MultiPoint
-                centroids_all = MultiPoint(level_centroids).centroid
+                # Start with highest level centroid
+                blended_centroid = level_centroids[0]
 
-                # Apply weighted average
-                lambda_ = 0.5  # Adjust this for different blending
-                new_x = (1 - lambda_) * lloyd_centroid[0] + lambda_ * centroids_all.x
-                new_y = (1 - lambda_) * lloyd_centroid[1] + lambda_ * centroids_all.y
+                # Cascading midpoint calculation
+                for i in range(1, len(level_centroids)):
+                    # Find midpoint between current blended centroid and next level centroid
+                    blended_centroid = Point(
+                        (blended_centroid.x + level_centroids[i].x) / 2,
+                        (blended_centroid.y + level_centroids[i].y) / 2
+                    )
+
+                # Final midpoint between cascaded centroid and Lloyd position
+                lloyd_centroid = centroids[self.fixed_point_index]
+                lambda_ = 0.5
+                new_x = (1 - lambda_) * lloyd_centroid[0] + lambda_ * blended_centroid.x
+                new_y = (1 - lambda_) * lloyd_centroid[1] + lambda_ * blended_centroid.y
                 centroids[self.fixed_point_index] = (new_x, new_y)
+
+                # Visualization (temporary)
+                self.visualize_neighborhood_hierarchy(level_polygons, blended_centroid, lloyd_centroid)
 
         self.auto_previous_points = np.array(self.points)
         self.points = centroids
         self.vor = Voronoi(self.add_mirror_points(self.points))
         self.iteration_count += 1
         self.info_label.config(text=f"Iterations: {self.iteration_count}")
-
-        # First plot the Voronoi diagram
         self.plot_voronoi()
 
-        # THEN add our visualizations on top
-        if self.fixed_point_index is not None and level_polygons:
-            colors = ['green', 'orange', 'purple', 'fuchsia']  # Different color per level
+    def visualize_neighborhood_hierarchy(self, level_polygons, final_centroid, lloyd_centroid):
+        """Temporary visualization of the midpoint cascade"""
+        colors = ['purple', 'orange', 'green']  # From level 3 to level 1
+        markers = ['o', 's', 'D']  # Different markers for each level
 
-            # Visualize neighborhood polygons
-            for level, poly in level_polygons:
-                self.ax.plot(*poly.exterior.xy, color=colors[level - 1],
-                             linewidth=2, linestyle='--',
-                             label=f'Level {level-1} neighborhood')
+        # Plot neighborhood polygons
+        for (level, poly), color in zip(reversed(level_polygons), colors):
+            self.ax.plot(*poly.exterior.xy, color=color, linewidth=1.5,
+                         linestyle='--', alpha=0.7, label=f'Level {level}')
 
-            # Visualize centroids
-            for i, centroid in enumerate(level_centroids):
-                self.ax.plot(centroid.x, centroid.y, 'o',
-                             color=colors[i], markersize=10)
-            self.ax.plot(centroids_all.x, centroids_all.y, 'kx', markersize=12)
+        # Plot centroids and midpoints
+        current_point = None
+        for i, (_, poly) in enumerate(reversed(level_polygons)):
+            centroid = poly.centroid
+            self.ax.plot(centroid.x, centroid.y, markers[i], color=colors[i],
+                         markersize=8, label=f'Centroid L{len(level_polygons) - i}')
 
-            # Add legend
-            self.ax.legend()
+            if current_point:
+                # Draw midpoint line
+                mid_x = (current_point.x + centroid.x) / 2
+                mid_y = (current_point.y + centroid.y) / 2
+                self.ax.plot([current_point.x, mid_x], [current_point.y, mid_y],
+                             'k-', linewidth=1, alpha=0.5)
+                current_point = Point(mid_x, mid_y)
+            else:
+                current_point = centroid
 
-            # Force redraw
-            if self.canvas:
-                self.canvas.draw()
+        # Draw final blending
+        self.ax.plot(final_centroid.x, final_centroid.y, 'kx', markersize=10,
+                     label='Cascaded Centroid')
+        self.ax.plot(lloyd_centroid[0], lloyd_centroid[1], 'ro', markersize=8,
+                     label='Lloyd Position')
+        self.ax.plot([final_centroid.x, lloyd_centroid[0]],
+                     [final_centroid.y, lloyd_centroid[1]],
+                     'm-', linewidth=2, alpha=0.7, label='Final Blend')
+
+        self.ax.legend(loc='upper right', fontsize=8)
 
     def auto_lloyd(self):
         if self.vor is None:
