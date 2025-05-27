@@ -15,61 +15,61 @@ class VoronoiGenerator:
         self.root = root
         self.root.title("CVT Generator with Radiant Algorithm")
 
-        # Initialize variables
         self.points = []
         self.original_points = []
         self.vor = None
+        self.original_vor = None
         self.centroids = None
         self.iteration_count = 0
+        self.radiant_iterations = 0
         self.auto_running = False
         self.auto_previous_points = None
-        self.radiant_running = False
-        self.radiant_iterations = 0
-        self.max_radiant_iterations = 100  # Set maximum radiant iterations
+
+        self.fixed_point_mode = False
         self.fixed_point_index = None
 
-        # Setup UI
-        self.setup_ui()
-
-        # Canvas bounds
-        self.bounds = [0, 600, 0, 400]
-        self.width = self.bounds[1] - self.bounds[0]
-        self.height = self.bounds[3] - self.bounds[2]
-
-    def setup_ui(self):
         self.main_frame = tk.Frame(self.root)
         self.main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Canvas for points
         self.click_canvas = tk.Canvas(self.main_frame, bg='white', width=600, height=400)
         self.click_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        # Button frame
         self.button_frame = tk.Frame(self.main_frame)
         self.button_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=5, pady=5)
 
-        # Buttons
-        buttons = [
-            ("Generate Random Points", self.generate_random_points),
-            ("Clear Points", self.clear_points),
-            ("Generate Voronoi", self.generate_voronoi),
-            ("Lloyd's Algorithm", self.apply_lloyd),
-            ("Auto CVT", self.auto_lloyd),
-            ("Run Radiant Algorithm", self.run_radiant_algorithm),
-            ("Show Original Points", self.show_original_points)
-        ]
+        self.random_button = tk.Button(self.button_frame, text="Generate Random Points",
+                                       command=self.generate_random_points)
+        self.random_button.pack(fill=tk.X, pady=5)
 
-        for text, command in buttons:
-            btn = tk.Button(self.button_frame, text=text, command=command)
-            btn.pack(fill=tk.X, pady=5)
+        self.clear_button = tk.Button(self.button_frame, text="Clear Points", command=self.clear_points)
+        self.clear_button.pack(fill=tk.X, pady=5)
 
-        # Info label
+        self.generate_button = tk.Button(self.button_frame, text="Generate Voronoi", command=self.generate_voronoi)
+        self.generate_button.pack(fill=tk.X, pady=5)
+
+        self.lloyd_button = tk.Button(self.button_frame, text="Lloyd's Algorithm", command=self.apply_lloyd)
+        self.lloyd_button.pack(fill=tk.X, pady=5)
+
+        self.auto_lloyd_button = tk.Button(self.button_frame, text="Auto CVT", command=self.auto_lloyd)
+        self.auto_lloyd_button.pack(fill=tk.X, pady=5)
+
+        self.radiant_button = tk.Button(self.button_frame, text="Run Radiant Algorithm",
+                                        command=self.apply_radiant_algorithm)
+        self.radiant_button.pack(fill=tk.X, pady=5)
+
+        self.show_original_button = tk.Button(self.button_frame, text="Show Original Points",
+                                              command=self.show_original_points)
+        self.show_original_button.pack(fill=tk.X, pady=5)
+
         self.info_label = tk.Label(self.button_frame, text="Iterations: 0")
         self.info_label.pack(fill=tk.X, pady=5)
 
-        # Matplotlib figure
         self.fig, self.ax = plt.subplots(figsize=(6, 4))
         self.canvas = None
+
+        self.bounds = [0, 600, 0, 400]
+        self.width = self.bounds[1] - self.bounds[0]
+        self.height = self.bounds[3] - self.bounds[2]
 
     def generate_random_points(self):
         seed = simpledialog.askinteger("Random Seed", "Enter random seed:", parent=self.root)
@@ -116,6 +116,31 @@ class VoronoiGenerator:
             self.canvas.get_tk_widget().destroy()
             self.ax.clear()
 
+    def add_mirror_points(self, points):
+        if len(points) == 0:
+            return points
+
+        points = np.array(points)
+        mirrored = []
+
+        left_mirror = np.copy(points)
+        left_mirror[:, 0] = -left_mirror[:, 0]
+        mirrored.append(left_mirror)
+
+        right_mirror = np.copy(points)
+        right_mirror[:, 0] = 2 * self.width - right_mirror[:, 0]
+        mirrored.append(right_mirror)
+
+        bottom_mirror = np.copy(points)
+        bottom_mirror[:, 1] = -bottom_mirror[:, 1]
+        mirrored.append(bottom_mirror)
+
+        top_mirror = np.copy(points)
+        top_mirror[:, 1] = 2 * self.height - top_mirror[:, 1]
+        mirrored.append(top_mirror)
+
+        return np.vstack([points] + mirrored)
+
     def generate_voronoi(self):
         if len(self.points) < 2:
             messagebox.showwarning("Warning", "Need at least 2 points")
@@ -126,6 +151,44 @@ class VoronoiGenerator:
         self.iteration_count = 0
         self.info_label.config(text=f"Iterations: {self.iteration_count}")
         self.plot_voronoi()
+
+    def plot_voronoi(self):
+        self.ax.clear()
+
+        bounding_box = Polygon([
+            (self.bounds[0], self.bounds[2]),
+            (self.bounds[1], self.bounds[2]),
+            (self.bounds[1], self.bounds[3]),
+            (self.bounds[0], self.bounds[3])
+        ])
+
+        for i, region_index in enumerate(self.vor.point_region[:len(self.points)]):
+            region = self.vor.regions[region_index]
+            if -1 in region or len(region) == 0:
+                continue
+            polygon = Polygon(self.vor.vertices[region])
+            clipped = polygon.intersection(bounding_box)
+            if clipped.is_empty:
+                continue
+            if isinstance(clipped, Polygon):
+                self.ax.fill(*clipped.exterior.xy, alpha=0.4)
+            elif isinstance(clipped, MultiPolygon):
+                for poly in clipped.geoms:
+                    self.ax.fill(*poly.exterior.xy, alpha=0.4)
+
+        # Plot all points
+        for i, point in enumerate(self.points):
+            self.ax.plot(point[0], point[1], 'o', color='red', markersize=5)
+
+        self.ax.set_xlim(self.bounds[0], self.bounds[1])
+        self.ax.set_ylim(self.bounds[2], self.bounds[3])
+        self.ax.set_title(f"Voronoi Diagram (Iteration: {self.iteration_count})")
+
+        if self.canvas:
+            self.canvas.get_tk_widget().destroy()
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self.click_canvas)
+        self.canvas.draw()
+        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
     def apply_lloyd(self):
         if self.vor is None:
@@ -173,7 +236,7 @@ class VoronoiGenerator:
         self.root.after(100, self.run_auto_lloyd)
 
     def select_most_central_point(self):
-        if not self.points:
+        if len(self.points)==0:
             return
 
         center_x, center_y = self.width / 2, self.height / 2
@@ -222,6 +285,16 @@ class VoronoiGenerator:
         self.root.after(100, self.run_radiant_iteration)
 
     def apply_radiant_algorithm(self):
+        if self.fixed_point_index is None:
+            messagebox.showwarning("Warning", "No central point selected. Run CVT first.")
+            return
+
+        if self.vor is None:
+            messagebox.showwarning("Warning", "Generate the Voronoi diagram first.")
+            return
+        centroids = self.calculate_centroids()
+        lloyd_centroid = centroids[self.fixed_point_index]
+
         level_polygons = self.get_neighborhood_polygons(self.fixed_point_index, 3)
 
         if not level_polygons:
@@ -230,16 +303,18 @@ class VoronoiGenerator:
         level_centroids = [poly.centroid for level, poly in level_polygons]
         centroids_all = MultiPoint(level_centroids).centroid
 
-        current_pos = self.points[self.fixed_point_index]
-        lambda_ = 0.7  # Radiant effect weight
-        new_x = (1 - lambda_) * current_pos[0] + lambda_ * centroids_all.x
-        new_y = (1 - lambda_) * current_pos[1] + lambda_ * centroids_all.y
+        lambda_ = 0.5  # Adjust this for different blending
+        new_x = (1 - lambda_) * lloyd_centroid[0] + lambda_ * centroids_all.x
+        new_y = (1 - lambda_) * lloyd_centroid[1] + lambda_ * centroids_all.y
+        centroids[self.fixed_point_index] = (new_x, new_y)
 
-        self.points[self.fixed_point_index] = (new_x, new_y)
+        self.auto_previous_points = np.array(self.points)
+        self.points = centroids
         self.vor = Voronoi(self.add_mirror_points(self.points))
         self.iteration_count += 1
         self.info_label.config(text=f"Iterations: {self.iteration_count}")
 
+        # Visualize
         self.plot_radiant_voronoi(level_polygons)
 
     def plot_radiant_voronoi(self, level_polygons):
@@ -277,7 +352,7 @@ class VoronoiGenerator:
             for level, poly in level_polygons:
                 self.ax.plot(*poly.exterior.xy, color='black',
                              linewidth=2, linestyle='--',
-                             label=f'Level {level} neighborhood')
+                             label=f'Level {level-1} neighborhood')
 
         # Plot all other points
         for i, point in enumerate(self.points):
@@ -296,8 +371,90 @@ class VoronoiGenerator:
         self.canvas.draw()
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
-    # ... [Keep all the helper methods like add_mirror_points, calculate_centroids,
-    # get_neighborhood_polygons, etc. from previous version] ...
+    def get_neighborhood_polygons(self, idx, max_levels):
+        polygons = []
+        all_previous = set()
+
+        for level in range(1, max_levels + 1):
+            neighbor_indices = self.get_k_level_neighbors(idx, level)
+
+            if not neighbor_indices:
+                continue
+
+            new_indices = [i for i in neighbor_indices if i not in all_previous]
+            if not new_indices:
+                continue
+
+            neighbor_points = [self.points[i] for i in new_indices]
+            all_previous.update(new_indices)
+
+            if len(neighbor_points) >= 3:
+                center = self.points[idx]
+                sorted_points = sorted(neighbor_points,
+                                       key=lambda p: np.arctan2(p[1] - center[1], p[0] - center[0]))
+                polygon = Polygon(sorted_points)
+                polygons.append((level, polygon))
+            elif len(neighbor_points) == 2:
+                line = LineString(neighbor_points)
+                polygon = line.buffer(0.1)
+                polygons.append((level, polygon))
+
+        return polygons
+
+    def get_k_level_neighbors(self, idx, k_level):
+        if k_level < 1:
+            return []
+
+        visited = set()
+        current_level = {idx}
+
+        for level in range(1, k_level + 1):
+            next_level = set()
+            for point_idx in current_level:
+                if point_idx not in visited:
+                    neighbors = self.get_voronoi_neighbors(point_idx)
+                    next_level.update(n for n in neighbors if n not in visited)
+                    visited.add(point_idx)
+            if level < k_level:
+                current_level = next_level - visited
+
+        return list(current_level)
+
+    def get_voronoi_neighbors(self, idx):
+        neighbors = set()
+        for p1, p2 in self.vor.ridge_points:
+            if p1 == idx and p2 < len(self.points):
+                neighbors.add(p2)
+            elif p2 == idx and p1 < len(self.points):
+                neighbors.add(p1)
+        return list(neighbors)
+
+    def calculate_centroids(self):
+        centroids = []
+        bounding_box = Polygon([
+            (self.bounds[0], self.bounds[2]),
+            (self.bounds[1], self.bounds[2]),
+            (self.bounds[1], self.bounds[3]),
+            (self.bounds[0], self.bounds[3])
+        ])
+
+        for i in range(len(self.points)):
+            region_index = self.vor.point_region[i]
+            region = self.vor.regions[region_index]
+            if -1 in region or len(region) == 0:
+                centroids.append(self.points[i])
+                continue
+            polygon = Polygon(self.vor.vertices[region])
+            clipped = polygon.intersection(bounding_box)
+            if clipped.is_empty:
+                centroids.append(self.points[i])
+            else:
+                centroids.append((clipped.centroid.x, clipped.centroid.y))
+
+        return np.array(centroids)
+
+    def show_original_points(self):
+        self.plot_voronoi()
 
 
 if __name__ == "__main__":
