@@ -9,73 +9,86 @@ import copy
 import random
 from sklearn.cluster import KMeans
 
-
 class VoronoiGenerator:
     def __init__(self, root):
         self.root = root
         self.root.title("CVT Generator with Radiant Algorithm")
 
+        # Initialize all required attributes
         self.points = []
         self.original_points = []
         self.vor = None
-        self.original_vor = None
         self.centroids = None
         self.iteration_count = 0
-        self.radiant_iterations = 0
         self.auto_running = False
-        self.auto_previous_points = None
-
-        self.fixed_point_mode = False
+        self.radiant_running = False
+        self.radiant_iterations = 0
+        self.max_radiant_iterations = 100
         self.fixed_point_index = None
+        self.auto_previous_points = None  # Initialize this attribute
+        self.auto_tolerance = 1e-3  # Initialize tolerance
 
-        self.main_frame = tk.Frame(self.root)
-        self.main_frame.pack(fill=tk.BOTH, expand=True)
+        # Create UI elements
+        self.create_ui()
 
-        # Change canvas dimensions to square (500x500)
-        self.canvas_size = 600
-        self.click_canvas = tk.Canvas(self.main_frame, bg='white', width=self.canvas_size, height=self.canvas_size)
-        self.click_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        self.button_frame = tk.Frame(self.main_frame)
-        self.button_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=5, pady=5)
-
-        self.random_button = tk.Button(self.button_frame, text="Generate Random Points",
-                                       command=self.generate_random_points)
-        self.random_button.pack(fill=tk.X, pady=5)
-
-        self.clear_button = tk.Button(self.button_frame, text="Clear Points", command=self.clear_points)
-        self.clear_button.pack(fill=tk.X, pady=5)
-
-        self.generate_button = tk.Button(self.button_frame, text="Generate Voronoi", command=self.generate_voronoi)
-        self.generate_button.pack(fill=tk.X, pady=5)
-
-        self.lloyd_button = tk.Button(self.button_frame, text="Lloyd's Algorithm", command=self.apply_lloyd)
-        self.lloyd_button.pack(fill=tk.X, pady=5)
-
-        self.auto_lloyd_button = tk.Button(self.button_frame, text="Auto CVT", command=self.auto_lloyd)
-        self.auto_lloyd_button.pack(fill=tk.X, pady=5)
-
-        self.radiant_button = tk.Button(self.button_frame, text="Run Radiant Algorithm",
-                                        command=self.apply_radiant_algorithm)
-        self.radiant_button.pack(fill=tk.X, pady=5)
-
-        self.show_original_button = tk.Button(self.button_frame, text="Show Original Points",
-                                              command=self.show_original_points)
-        self.show_original_button.pack(fill=tk.X, pady=5)
-
-        self.info_label = tk.Label(self.button_frame, text="Iterations: 0")
-        self.info_label.pack(fill=tk.X, pady=5)
-
-        self.fig, self.ax = plt.subplots(figsize=(6, 6))
-        self.canvas = None
-
-        self.bounds = [0, self.canvas_size, 0, self.canvas_size]
+        # Canvas dimensions
+        self.bounds = [0, 600, 0, 400]
         self.width = self.bounds[1] - self.bounds[0]
         self.height = self.bounds[3] - self.bounds[2]
 
+    def create_ui(self):
+        self.main_frame = tk.Frame(self.root)
+        self.main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Canvas for points
+        self.click_canvas = tk.Canvas(self.main_frame, bg='white', width=600, height=400)
+        self.click_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # Button frame
+        self.button_frame = tk.Frame(self.main_frame)
+        self.button_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=5, pady=5)
+
+        # Create and store references to all buttons
+        self.random_button = tk.Button(self.button_frame, text="Generate Random Points",
+                                     command=self.generate_random_points)
+        self.random_button.pack(fill=tk.X, pady=5)
+
+        self.clear_button = tk.Button(self.button_frame, text="Clear Points",
+                                    command=self.clear_points)
+        self.clear_button.pack(fill=tk.X, pady=5)
+
+        self.generate_button = tk.Button(self.button_frame, text="Generate Voronoi",
+                                       command=self.generate_voronoi)
+        self.generate_button.pack(fill=tk.X, pady=5)
+
+        self.lloyd_button = tk.Button(self.button_frame, text="Lloyd's Algorithm",
+                                     command=self.apply_lloyd)
+        self.lloyd_button.pack(fill=tk.X, pady=5)
+
+        self.auto_lloyd_button = tk.Button(self.button_frame, text="Auto CVT",
+                                          command=self.auto_lloyd)
+        self.auto_lloyd_button.pack(fill=tk.X, pady=5)
+
+        self.radiant_button = tk.Button(self.button_frame, text="Run Radiant Algorithm",
+                                       command=self.run_radiant_algorithm)
+        self.radiant_button.pack(fill=tk.X, pady=5)
+
+        self.show_original_button = tk.Button(self.button_frame, text="Show Original Points",
+                                            command=self.show_original_points)
+        self.show_original_button.pack(fill=tk.X, pady=5)
+
+        # Info label
+        self.info_label = tk.Label(self.button_frame, text="Iterations: 0")
+        self.info_label.pack(fill=tk.X, pady=5)
+
+        # Matplotlib figure
+        self.fig, self.ax = plt.subplots(figsize=(6, 4))
+        self.canvas = None
+
     def generate_random_points(self):
-        seed = simpledialog.askinteger("Random Seed", "Enter random seed:", parent=self.root)
-        num_points = simpledialog.askinteger("Number of Points", "Points to generate:",
+        seed = simpledialog.askinteger("Random Seed", "Enter random seed (leave empty for random):",
+                                       parent=self.root, minvalue=0)
+        num_points = simpledialog.askinteger("Number of Points", "How many random points to generate?",
                                              parent=self.root, minvalue=2, initialvalue=20)
 
         if num_points is None:
@@ -118,6 +131,18 @@ class VoronoiGenerator:
             self.canvas.get_tk_widget().destroy()
             self.ax.clear()
 
+    def generate_voronoi(self):
+        if len(self.points) < 2:
+            messagebox.showwarning("Warning", "You need at least 2 points to generate a Voronoi diagram")
+            return
+
+        self.points = np.array(self.points)
+        all_points = self.add_mirror_points(self.points)
+        self.vor = Voronoi(all_points)
+        self.iteration_count = 0
+        self.info_label.config(text=f"Iterations: {self.iteration_count}")
+        self.plot_voronoi()
+
     def add_mirror_points(self, points):
         if len(points) == 0:
             return points
@@ -125,6 +150,7 @@ class VoronoiGenerator:
         points = np.array(points)
         mirrored = []
 
+        # Basic mirroring (left, right, top, bottom)
         left_mirror = np.copy(points)
         left_mirror[:, 0] = -left_mirror[:, 0]
         mirrored.append(left_mirror)
@@ -142,17 +168,6 @@ class VoronoiGenerator:
         mirrored.append(top_mirror)
 
         return np.vstack([points] + mirrored)
-
-    def generate_voronoi(self):
-        if len(self.points) < 2:
-            messagebox.showwarning("Warning", "Need at least 2 points")
-            return
-
-        self.points = np.array(self.points)
-        self.vor = Voronoi(self.add_mirror_points(self.points))
-        self.iteration_count = 0
-        self.info_label.config(text=f"Iterations: {self.iteration_count}")
-        self.plot_voronoi()
 
     def plot_voronoi(self):
         self.ax.clear()
@@ -180,7 +195,8 @@ class VoronoiGenerator:
 
         # Plot all points
         for i, point in enumerate(self.points):
-            self.ax.plot(point[0], point[1], 'o', color='red', markersize=5)
+            color = 'blue' if i == self.fixed_point_index else 'red'
+            self.ax.plot(point[0], point[1], 'o', color=color, markersize=5)
 
         self.ax.set_xlim(self.bounds[0], self.bounds[1])
         self.ax.set_ylim(self.bounds[2], self.bounds[3])
@@ -194,11 +210,12 @@ class VoronoiGenerator:
 
     def apply_lloyd(self):
         if self.vor is None:
-            messagebox.showwarning("Warning", "Generate Voronoi first")
+            messagebox.showwarning("Warning", "Generate the Voronoi diagram first.")
             return
 
         self.centroids = self.calculate_centroids()
-        self.vor = Voronoi(self.add_mirror_points(self.centroids))
+        all_points = self.add_mirror_points(self.centroids)
+        self.vor = Voronoi(all_points)
         self.points = self.centroids.copy()
         self.iteration_count += 1
         self.info_label.config(text=f"Iterations: {self.iteration_count}")
@@ -206,39 +223,49 @@ class VoronoiGenerator:
 
     def auto_lloyd(self):
         if self.vor is None:
-            messagebox.showwarning("Warning", "Generate Voronoi first")
+            messagebox.showwarning("Warning", "Generate the Voronoi diagram first.")
             return
 
         if self.auto_running:
             self.auto_running = False
             self.auto_lloyd_button.config(text="Auto CVT")
             return
-
-        self.auto_running = True
-        self.auto_lloyd_button.config(text="Stop CVT")
-        self.auto_tolerance = 1e-3
-        self.run_auto_lloyd()
+        else:
+            self.auto_running = True
+            self.auto_lloyd_button.config(text="Stop Auto CVT")
+            self.auto_previous_points = self.points.copy()
+            self.auto_iterations = 0
+            self.auto_max_iterations = 100
+            self.auto_tolerance = 1e-3
+            self.root.after(10, self.run_auto_lloyd)
 
     def run_auto_lloyd(self):
-        if not self.auto_running:
+        if not self.auto_running or self.auto_iterations >= self.auto_max_iterations:
+            self.auto_running = False
+            self.auto_lloyd_button.config(text="Auto CVT")
             return
 
-        current_points = np.array(self.points)
-        self.apply_lloyd()
+        centroids = self.calculate_centroids()
+        movement = np.linalg.norm(self.auto_previous_points - centroids)
 
-        if self.auto_previous_points is not None:
-            movement = np.linalg.norm(self.auto_previous_points - self.points)
-            if movement < self.auto_tolerance or self.iteration_count == 150:
-                self.auto_running = False
-                self.auto_lloyd_button.config(text="Auto CVT")
-                self.select_most_central_point()
-                return
+        if movement < self.auto_tolerance:
+            self.auto_running = False
+            self.auto_lloyd_button.config(text="Auto CVT")
+            return
 
-        self.auto_previous_points = current_points
-        self.root.after(100, self.run_auto_lloyd)
+        all_points = self.add_mirror_points(centroids)
+        self.vor = Voronoi(all_points)
+        self.points = centroids.copy()
+        self.auto_previous_points = centroids.copy()
+        self.iteration_count += 1
+        self.auto_iterations += 1
+        self.info_label.config(text=f"Iterations: {self.iteration_count}")
+        self.plot_voronoi()
+
+        self.root.after(10, self.run_auto_lloyd)
 
     def select_most_central_point(self):
-        if len(self.points)==0:
+        if len(self.points):
             return
 
         center_x, center_y = self.width / 2, self.height / 2
@@ -252,20 +279,15 @@ class VoronoiGenerator:
                 central_idx = i
 
         self.fixed_point_index = central_idx
-
         self.plot_voronoi()
-        self.ax.plot(self.points[central_idx][0], self.points[central_idx][1],
-                     'o', color='blue', markersize=8, label='Central Point')
-        self.ax.legend()
-        self.canvas.draw()
 
     def run_radiant_algorithm(self):
         if self.fixed_point_index is None:
-            messagebox.showwarning("Warning", "No central point. Run CVT first.")
+            messagebox.showwarning("Warning", "No central point selected. Run CVT first.")
             return
 
         if self.vor is None:
-            messagebox.showwarning("Warning", "Generate Voronoi first.")
+            messagebox.showwarning("Warning", "Generate the Voronoi diagram first.")
             return
 
         if self.radiant_running:
@@ -281,47 +303,37 @@ class VoronoiGenerator:
             self.radiant_running = False
             return
 
-        self.apply_radiant_algorithm()
-        self.radiant_iterations += 1
+        # Get neighborhood polygons
+        level_polygons = self.get_neighborhood_polygons(self.fixed_point_index, 3)
+
+        if level_polygons:
+            # Calculate centroids for each level's polygon
+            level_centroids = [poly.centroid for level, poly in level_polygons]
+            centroids_all = MultiPoint(level_centroids).centroid
+
+            # Move central point
+            current_pos = self.points[self.fixed_point_index]
+            lambda_ = 0.7
+            new_x = (1 - lambda_) * current_pos[0] + lambda_ * centroids_all.x
+            new_y = (1 - lambda_) * current_pos[1] + lambda_ * centroids_all.y
+            self.points[self.fixed_point_index] = (new_x, new_y)
+
+            # Regenerate Voronoi
+            self.vor = Voronoi(self.add_mirror_points(self.points))
+            self.iteration_count += 1
+            self.radiant_iterations += 1
+            self.info_label.config(
+                text=f"Iterations: {self.iteration_count} (Radiant: {self.radiant_iterations})")
+
+            # Visualize
+            self.plot_radiant_voronoi(level_polygons)
+
+        # Schedule next iteration
         self.root.after(100, self.run_radiant_iteration)
-
-    def apply_radiant_algorithm(self):
-        if self.fixed_point_index is None:
-            messagebox.showwarning("Warning", "No central point selected. Run CVT first.")
-            return
-
-        if self.vor is None:
-            messagebox.showwarning("Warning", "Generate the Voronoi diagram first.")
-            return
-        centroids = self.calculate_centroids()
-        lloyd_centroid = centroids[self.fixed_point_index]
-
-        level_polygons = self.get_neighborhood_polygons(self.fixed_point_index, 7)
-
-        if not level_polygons:
-            return
-
-        level_centroids = [poly.centroid for level, poly in level_polygons]
-        centroids_all = MultiPoint(level_centroids).centroid
-
-        lambda_ = 0.5
-        new_x = (1 - lambda_) * lloyd_centroid[0] + lambda_ * centroids_all.x
-        new_y = (1 - lambda_) * lloyd_centroid[1] + lambda_ * centroids_all.y
-        centroids[self.fixed_point_index] = (new_x, new_y)
-
-        self.auto_previous_points = np.array(self.points)
-        self.points = centroids
-        self.vor = Voronoi(self.add_mirror_points(self.points))
-        self.iteration_count += 1
-        self.info_label.config(text=f"Iterations: {self.iteration_count}")
-
-        # Visualize
-        self.plot_radiant_voronoi(level_polygons)
 
     def plot_radiant_voronoi(self, level_polygons):
         self.ax.clear()
 
-        # Plot Voronoi cells
         bounding_box = Polygon([
             (self.bounds[0], self.bounds[2]),
             (self.bounds[1], self.bounds[2]),
@@ -349,13 +361,13 @@ class VoronoiGenerator:
                          self.points[self.fixed_point_index][1],
                          'o', color='blue', markersize=8, label='Central Point')
 
-            # Plot neighborhood polygons in black
+            # Visualize neighborhood polygons in black
             for level, poly in level_polygons:
                 self.ax.plot(*poly.exterior.xy, color='black',
                              linewidth=2, linestyle='--',
-                             label=f'Level {level-1} neighborhood')
+                             label=f'Level {level} neighborhood')
 
-        # Plot all other points
+        # Plot all points
         for i, point in enumerate(self.points):
             if i == self.fixed_point_index:
                 continue
@@ -363,7 +375,7 @@ class VoronoiGenerator:
 
         self.ax.set_xlim(self.bounds[0], self.bounds[1])
         self.ax.set_ylim(self.bounds[2], self.bounds[3])
-        self.ax.set_title(f"Radiant Algorithm (Iteration: {self.iteration_count})")
+        self.ax.set_title(f"Voronoi Diagram (Iteration: {self.iteration_count})")
         self.ax.legend()
 
         if self.canvas:
