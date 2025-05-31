@@ -31,7 +31,9 @@ class VoronoiGenerator:
         self.main_frame = tk.Frame(self.root)
         self.main_frame.pack(fill=tk.BOTH, expand=True)
 
-        self.click_canvas = tk.Canvas(self.main_frame, bg='white', width=600, height=400)
+        # Change canvas dimensions to square (500x500)
+        self.canvas_size = 600
+        self.click_canvas = tk.Canvas(self.main_frame, bg='white', width=self.canvas_size, height=self.canvas_size)
         self.click_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         self.button_frame = tk.Frame(self.main_frame)
@@ -64,10 +66,10 @@ class VoronoiGenerator:
         self.info_label = tk.Label(self.button_frame, text="Iterations: 0")
         self.info_label.pack(fill=tk.X, pady=5)
 
-        self.fig, self.ax = plt.subplots(figsize=(6, 4))
+        self.fig, self.ax = plt.subplots(figsize=(6, 6))
         self.canvas = None
 
-        self.bounds = [0, 600, 0, 400]
+        self.bounds = [0, self.canvas_size, 0, self.canvas_size]
         self.width = self.bounds[1] - self.bounds[0]
         self.height = self.bounds[3] - self.bounds[2]
 
@@ -226,7 +228,7 @@ class VoronoiGenerator:
 
         if self.auto_previous_points is not None:
             movement = np.linalg.norm(self.auto_previous_points - self.points)
-            if movement < self.auto_tolerance:
+            if movement < self.auto_tolerance or self.iteration_count == 150:
                 self.auto_running = False
                 self.auto_lloyd_button.config(text="Auto CVT")
                 self.select_most_central_point()
@@ -284,21 +286,79 @@ class VoronoiGenerator:
         self.radiant_iterations += 1
         self.root.after(100, self.run_radiant_iteration)
 
+    def is_boundary_point(self, point_idx):
+    
+        if point_idx >= len(self.points):  # Handle mirror points
+            return True
+
+        region_index = self.vor.point_region[point_idx]
+        if region_index == -1:  # Invalid region
+            return True
+
+        region = self.vor.regions[region_index]
+        if not region:  # Empty region
+            return True
+
+        for vertex_idx in region:
+            if vertex_idx == -1:  # Infinite vertex
+                return True
+            vertex = self.vor.vertices[vertex_idx]
+            if (vertex[0] <= self.bounds[0] + 1e-6 or
+                    vertex[0] >= self.bounds[1] - 1e-6 or
+                    vertex[1] <= self.bounds[2] + 1e-6 or
+                    vertex[1] >= self.bounds[3] - 1e-6):
+                return True
+        return False
+
+
+    def calculate_max_levels(self, central_idx):
+    
+        max_levels = 0
+        current_level = {central_idx}
+        visited = set(current_level)
+        boundary_found = False
+
+        while not boundary_found:
+            next_level = set()
+            for point_idx in current_level:
+                neighbors = self.get_voronoi_neighbors(point_idx)
+                for neighbor_idx in neighbors:
+                    if neighbor_idx not in visited:
+                        if self.is_boundary_point(neighbor_idx):
+                            boundary_found = True
+                            break
+                        next_level.add(neighbor_idx)
+                        visited.add(neighbor_idx)
+                if boundary_found:
+                    break
+
+            if not boundary_found and next_level:
+                max_levels += 1
+                current_level = next_level
+            else:
+                break
+
+        return max_levels if max_levels > 0 else 1  # Return at least 1 level
+
     def apply_radiant_algorithm(self):
         if self.fixed_point_index is None:
-            messagebox.showwarning("Warning", "No central point selected. Run CVT first.")
+            messagebox.showwarning("Warning", "No central point. Run CVT first.")
             return
 
         if self.vor is None:
-            messagebox.showwarning("Warning", "Generate the Voronoi diagram first.")
+            messagebox.showwarning("Warning", "Generate Voronoi first.")
             return
-        centroids = self.calculate_centroids()
-        lloyd_centroid = centroids[self.fixed_point_index]
 
-        level_polygons = self.get_neighborhood_polygons(self.fixed_point_index, 3)
+        # Calculate max_levels dynamically
+        max_levels = self.calculate_max_levels(self.fixed_point_index)
+        level_polygons = self.get_neighborhood_polygons(self.fixed_point_index, max_levels+1)
 
         if not level_polygons:
             return
+
+        # Rest of your radiant algorithm implementation...
+        centroids = self.calculate_centroids()
+        lloyd_centroid = centroids[self.fixed_point_index]
 
         level_centroids = [poly.centroid for level, poly in level_polygons]
         centroids_all = MultiPoint(level_centroids).centroid
@@ -314,7 +374,6 @@ class VoronoiGenerator:
         self.iteration_count += 1
         self.info_label.config(text=f"Iterations: {self.iteration_count}")
 
-        # Visualize
         self.plot_radiant_voronoi(level_polygons)
 
     def plot_radiant_voronoi(self, level_polygons):
