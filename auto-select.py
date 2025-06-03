@@ -224,7 +224,8 @@ class VoronoiGenerator:
             return
 
         current_points = np.array(self.points)
-        self.apply_lloyd()
+        for _ in range(10):
+            self.apply_lloyd()
 
         if self.auto_previous_points is not None:
             movement = np.linalg.norm(self.auto_previous_points - self.points)
@@ -407,13 +408,27 @@ class VoronoiGenerator:
                          self.points[self.fixed_point_index][1],
                          'o', color='blue', markersize=8, label='Central Point')
 
-            # Plot neighborhood polygons in black
-            for level, poly in level_polygons:
+        safe_levels_exist = False
+        for level, poly in level_polygons:
+            neighbor_indices = self.get_k_level_neighbors(self.fixed_point_index, level)
+            if not any(self.is_boundary_point(i) for i in neighbor_indices):
+                safe_levels_exist = True
+                break
+
+        max_level = max(level for level, _ in level_polygons) if level_polygons else 0
+
+        for level, poly in level_polygons:
+            neighbor_indices = self.get_k_level_neighbors(self.fixed_point_index, level)
+
+            if level == max_level and not any(self.is_boundary_point(i) for i in neighbor_indices):
                 self.ax.plot(*poly.exterior.xy, color='black',
                              linewidth=2, linestyle='--',
-                             label=f'Level {level-1} neighborhood')
+                             label=f'Level {level} neighborhood')
+            else:
+                self.ax.plot(*poly.exterior.xy, color='gray',
+                             linewidth=1, linestyle=':',
+                             alpha=0.5)
 
-        # Plot all other points
         for i, point in enumerate(self.points):
             if i == self.fixed_point_index:
                 continue
