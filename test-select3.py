@@ -224,7 +224,8 @@ class VoronoiGenerator:
             return
 
         current_points = np.array(self.points)
-        self.apply_lloyd()
+        for _ in range(10):
+            self.apply_lloyd()
 
         if self.auto_previous_points is not None:
             movement = np.linalg.norm(self.auto_previous_points - self.points)
@@ -238,7 +239,7 @@ class VoronoiGenerator:
         self.root.after(100, self.run_auto_lloyd)
 
     def select_most_central_point(self):
-        if len(self.points)==0:
+        if len(self.points) == 0:
             return
 
         center_x, center_y = self.width / 2, self.height / 2
@@ -253,6 +254,7 @@ class VoronoiGenerator:
 
         self.fixed_point_index = central_idx
 
+        # Highlight central point
         self.plot_voronoi()
         self.ax.plot(self.points[central_idx][0], self.points[central_idx][1],
                      'o', color='blue', markersize=8, label='Central Point')
@@ -285,26 +287,83 @@ class VoronoiGenerator:
         self.radiant_iterations += 1
         self.root.after(100, self.run_radiant_iteration)
 
+    def is_boundary_point(self, point_idx):
+
+        if point_idx >= len(self.points):  # Handle mirror points
+            return True
+
+        region_index = self.vor.point_region[point_idx]
+        if region_index == -1:  # Invalid region
+            return True
+
+        region = self.vor.regions[region_index]
+        if not region:  # Empty region
+            return True
+
+        for vertex_idx in region:
+            if vertex_idx == -1:  # Infinite vertex
+                return True
+            vertex = self.vor.vertices[vertex_idx]
+            if (vertex[0] <= self.bounds[0] + 1e-6 or
+                    vertex[0] >= self.bounds[1] - 1e-6 or
+                    vertex[1] <= self.bounds[2] + 1e-6 or
+                    vertex[1] >= self.bounds[3] - 1e-6):
+                return True
+        return False
+
+    def calculate_max_levels(self, central_idx):
+
+        max_levels = 0
+        current_level = {central_idx}
+        visited = set(current_level)
+        boundary_found = False
+
+        while not boundary_found:
+            next_level = set()
+            for point_idx in current_level:
+                neighbors = self.get_voronoi_neighbors(point_idx)
+                for neighbor_idx in neighbors:
+                    if neighbor_idx not in visited:
+                        if self.is_boundary_point(neighbor_idx):
+                            boundary_found = True
+                            break
+                        next_level.add(neighbor_idx)
+                        visited.add(neighbor_idx)
+                if boundary_found:
+                    break
+
+            if not boundary_found and next_level:
+                max_levels += 1
+                current_level = next_level
+            else:
+                break
+
+        return max_levels if max_levels > 0 else 1  # Return at least 1 level
+
     def apply_radiant_algorithm(self):
         if self.fixed_point_index is None:
-            messagebox.showwarning("Warning", "No central point selected. Run CVT first.")
+            messagebox.showwarning("Warning", "No central point. Run CVT first.")
             return
 
         if self.vor is None:
-            messagebox.showwarning("Warning", "Generate the Voronoi diagram first.")
+            messagebox.showwarning("Warning", "Generate Voronoi first.")
             return
-        centroids = self.calculate_centroids()
-        lloyd_centroid = centroids[self.fixed_point_index]
 
-        level_polygons = self.get_neighborhood_polygons(self.fixed_point_index, 7)
+        # Calculate max_levels dynamically
+        max_levels = self.calculate_max_levels(self.fixed_point_index)
+        level_polygons = self.get_neighborhood_polygons(self.fixed_point_index, max_levels+1)
 
         if not level_polygons:
             return
 
+        # Rest of your radiant algorithm implementation...
+        centroids = self.calculate_centroids()
+        lloyd_centroid = centroids[self.fixed_point_index]
+
         level_centroids = [poly.centroid for level, poly in level_polygons]
         centroids_all = MultiPoint(level_centroids).centroid
 
-        lambda_ = 0.5
+        lambda_ = 0.5  # Adjust this for different blending
         new_x = (1 - lambda_) * lloyd_centroid[0] + lambda_ * centroids_all.x
         new_y = (1 - lambda_) * lloyd_centroid[1] + lambda_ * centroids_all.y
         centroids[self.fixed_point_index] = (new_x, new_y)
@@ -315,7 +374,6 @@ class VoronoiGenerator:
         self.iteration_count += 1
         self.info_label.config(text=f"Iterations: {self.iteration_count}")
 
-        # Visualize
         self.plot_radiant_voronoi(level_polygons)
 
     def plot_radiant_voronoi(self, level_polygons):
@@ -349,13 +407,32 @@ class VoronoiGenerator:
                          self.points[self.fixed_point_index][1],
                          'o', color='blue', markersize=8, label='Central Point')
 
-            # Plot neighborhood polygons in black
-            for level, poly in level_polygons:
+        safe_levels_exist = False
+        for level, poly in level_polygons:
+            neighbor_indices = self.get_k_level_neighbors(self.fixed_point_index, level)
+            if not any(self.is_boundary_point(i) for i in neighbor_indices):
+                safe_levels_exist = True
+                break
+
+        max_level = max(level for level, _ in level_polygons) if level_polygons else 0 # 3
+        min_level = min(level for level, _ in level_polygons) if level_polygons else 0
+
+        for level, poly in level_polygons:
+            neighbor_indices = self.get_k_level_neighbors(self.fixed_point_index, level)
+
+            if level == max_level and not any(self.is_boundary_point(i) for i in neighbor_indices):
                 self.ax.plot(*poly.exterior.xy, color='black',
                              linewidth=2, linestyle='--',
                              label=f'Level {level-1} neighborhood')
+            elif level == min_level:
+                self.ax.plot(*poly.exterior.xy, color='green',
+                             linewidth=2, linestyle='--',
+                             label=f'Level {level-1} neighborhood')
+            else:
+                self.ax.plot(*poly.exterior.xy, color='gray',
+                             linewidth=1, linestyle=':',
+                             alpha=0.5)
 
-        # Plot all other points
         for i, point in enumerate(self.points):
             if i == self.fixed_point_index:
                 continue

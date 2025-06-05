@@ -239,7 +239,7 @@ class VoronoiGenerator:
         self.root.after(100, self.run_auto_lloyd)
 
     def select_most_central_point(self):
-        if len(self.points)==0:
+        if len(self.points) == 0:
             return
 
         center_x, center_y = self.width / 2, self.height / 2
@@ -288,7 +288,7 @@ class VoronoiGenerator:
         self.root.after(100, self.run_radiant_iteration)
 
     def is_boundary_point(self, point_idx):
-    
+
         if point_idx >= len(self.points):  # Handle mirror points
             return True
 
@@ -311,9 +311,8 @@ class VoronoiGenerator:
                 return True
         return False
 
-
     def calculate_max_levels(self, central_idx):
-    
+
         max_levels = 0
         current_level = {central_idx}
         visited = set(current_level)
@@ -352,7 +351,7 @@ class VoronoiGenerator:
 
         # Calculate max_levels dynamically
         max_levels = self.calculate_max_levels(self.fixed_point_index)
-        level_polygons = self.get_neighborhood_polygons(self.fixed_point_index, max_levels+1)
+        level_polygons = self.get_neighborhood_polygons(self.fixed_point_index, max_levels + 1)
 
         if not level_polygons:
             return
@@ -423,7 +422,7 @@ class VoronoiGenerator:
             if level == max_level and not any(self.is_boundary_point(i) for i in neighbor_indices):
                 self.ax.plot(*poly.exterior.xy, color='black',
                              linewidth=2, linestyle='--',
-                             label=f'Level {level} neighborhood')
+                             label=f'Level {level-1} neighborhood')
             else:
                 self.ax.plot(*poly.exterior.xy, color='gray',
                              linewidth=1, linestyle=':',
