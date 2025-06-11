@@ -125,30 +125,28 @@ class VoronoiGenerator:
             self.canvas.get_tk_widget().destroy()
             self.ax.clear()
 
-    def add_mirror_points(self, points):
-        if len(points) == 0:
-            return points
-
+    def add_periodic_ghosts(self, points):
+        """
+        For periodic CVT: Add ghost copies of all points translated by ±width and/or ±height,
+        so edges "wrap around". For a square domain, this means 8 translated copies + original.
+        """
         points = np.array(points)
-        mirrored = []
-
-        left_mirror = np.copy(points)
-        left_mirror[:, 0] = -left_mirror[:, 0]
-        mirrored.append(left_mirror)
-
-        right_mirror = np.copy(points)
-        right_mirror[:, 0] = 2 * self.width - right_mirror[:, 0]
-        mirrored.append(right_mirror)
-
-        bottom_mirror = np.copy(points)
-        bottom_mirror[:, 1] = -bottom_mirror[:, 1]
-        mirrored.append(bottom_mirror)
-
-        top_mirror = np.copy(points)
-        top_mirror[:, 1] = 2 * self.height - top_mirror[:, 1]
-        mirrored.append(top_mirror)
-
-        return np.vstack([points] + mirrored)
+        tile_shifts = [
+            (0, 0),
+            (self.width, 0),
+            (-self.width, 0),
+            (0, self.height),
+            (0, -self.height),
+            (self.width, self.height),
+            (self.width, -self.height),
+            (-self.width, self.height),
+            (-self.width, -self.height)
+        ]
+        all_points = []
+        for dx, dy in tile_shifts:
+            shifted = points + np.array([dx, dy])
+            all_points.append(shifted)
+        return np.vstack(all_points)
 
     def generate_voronoi(self):
         if len(self.points) < 2:
@@ -156,7 +154,7 @@ class VoronoiGenerator:
             return
 
         self.points = np.array(self.points)
-        self.vor = Voronoi(self.add_mirror_points(self.points))
+        self.vor = Voronoi(self.add_periodic_ghosts(self.points))
         self.iteration_count = 0
         self.info_label.config(text=f"Iterations: {self.iteration_count}")
         self.plot_voronoi()
@@ -205,7 +203,18 @@ class VoronoiGenerator:
             return
 
         self.centroids = self.calculate_centroids()
-        self.vor = Voronoi(self.add_mirror_points(self.centroids))
+
+        # Wrap all centroids into the [0, width] × [0, height] domain
+        centroids_wrapped = []
+        for x, y in self.centroids:
+            new_x = x % self.width
+            new_y = y % self.height
+            centroids_wrapped.append((new_x, new_y))
+        self.centroids = np.array(centroids_wrapped)
+
+        # Use periodic ghosts for Voronoi
+        self.vor = Voronoi(self.add_periodic_ghosts(self.centroids))
+
         self.points = self.centroids.copy()
         self.iteration_count += 1
         self.info_label.config(text=f"Iterations: {self.iteration_count}")
@@ -236,7 +245,7 @@ class VoronoiGenerator:
 
         if self.auto_previous_points is not None:
             movement = np.linalg.norm(self.auto_previous_points - self.points)
-            if movement < self.auto_tolerance or self.iteration_count == 150:
+            if movement < self.auto_tolerance or self.iteration_count == 300:
                 self.auto_running = False
                 self.auto_lloyd_button.config(text="Auto CVT")
                 self.select_most_central_point()
@@ -377,7 +386,7 @@ class VoronoiGenerator:
 
         self.auto_previous_points = np.array(self.points)
         self.points = centroids
-        self.vor = Voronoi(self.add_mirror_points(self.points))
+        self.vor = Voronoi(self.add_periodic_ghosts(self.points))
         self.iteration_count += 1
         self.info_label.config(text=f"Iterations: {self.iteration_count}")
 
@@ -573,7 +582,9 @@ class VoronoiGenerator:
                     for idx in relax_indices:
                         if idx == central_idx:
                             continue
-                        self.points[idx] = tuple(centroids[idx])
+                        new_x1 = centroids[idx][0] % self.width
+                        new_y1 = centroids[idx][1] % self.height
+                        self.points[idx] = (new_x1, new_y1)
 
                     # Radiant Lloyd for the central point with ONLY this level's polygon
                     if central_idx in relax_indices:
@@ -586,12 +597,12 @@ class VoronoiGenerator:
                         if poly is not None and not poly.is_empty:
                             radiant_centroid = poly.centroid
                             lloyd_centroid = centroids[central_idx]
-                            new_x = (1 - lam) * lloyd_centroid[0] + lam * radiant_centroid.x
-                            new_y = (1 - lam) * lloyd_centroid[1] + lam * radiant_centroid.y
-                            self.points[central_idx] = (new_x, new_y)
+                            new_x = ((1 - lam) * lloyd_centroid[0] + lam * radiant_centroid.x) % self.width
+                            new_y = ((1 - lam) * lloyd_centroid[1] + lam * radiant_centroid.y) % self.height
+                            self.points[self.fixed_point_index] = (new_x, new_y)
 
                     # Recompute Voronoi for next iteration
-                    self.vor = Voronoi(self.add_mirror_points(self.points))
+                    self.vor = Voronoi(self.add_periodic_ghosts(self.points))
 
                     # Check the maximum movement among relaxed points
                     new_positions = {i: np.array(self.points[i]) for i in relax_indices}
@@ -616,11 +627,10 @@ class VoronoiGenerator:
             # Or, if you want fixed points to persist, modify logic accordingly
 
         self.info_label.config(text=f"Sweeps Iter: {self.iteration_count}")
-
-        # Final plot
-        final_level_polygons = self.get_neighborhood_polygons(self.fixed_point_index, max_levels+1)
-        self.plot_radiant_voronoi(final_level_polygons)
         messagebox.showinfo("Info", f"Progressive radiant CVT finished in {self.iteration_count} iterations.")
+        # Final plot
+        final_level_polygons = self.get_neighborhood_polygons(self.fixed_point_index, max_levels)
+        self.plot_radiant_voronoi(final_level_polygons)
 
     def calculate_centroids(self):
         centroids = []
