@@ -31,9 +31,9 @@ class VoronoiGenerator:
         self.main_frame = tk.Frame(self.root)
         self.main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Change canvas dimensions to square (500x500)
-        self.canvas_size = 600
-        self.click_canvas = tk.Canvas(self.main_frame, bg='white', width=self.canvas_size, height=self.canvas_size)
+        self.width = 519
+        self.height = 450
+        self.click_canvas = tk.Canvas(self.main_frame, bg='white', width=self.width, height=self.width)
         self.click_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         self.button_frame = tk.Frame(self.main_frame)
@@ -73,10 +73,11 @@ class VoronoiGenerator:
         )
         self.progressive_radiant_central_btn.pack(fill=tk.X, pady=5)
 
-        self.fig, self.ax = plt.subplots(figsize=(6, 6))
+        self.fig, self.ax = plt.subplots(figsize=(self.width/100, self.height/100))
+        self.ax.set_aspect('equal')
         self.canvas = None
 
-        self.bounds = [0, self.canvas_size, 0, self.canvas_size]
+        self.bounds = [0, self.width, 0, self.height]
         self.width = self.bounds[1] - self.bounds[0]
         self.height = self.bounds[3] - self.bounds[2]
 
@@ -524,14 +525,7 @@ class VoronoiGenerator:
         return list(neighbors)
 
     def progressive_radiant_central_outward(self, tol=1e-6, max_iters=200, lam=0.5):
-        """
-        Sweep from central point outward:
-        1. For each level k (1...max_level), do Lloyd/Radiant Lloyd for ONLY A (the central point, updated as you go)
-           and the points in k-level, fixing all inner levels' points.
-        2. Stop a level when all those points (central + level-k neighbors) converge (< tol).
-        3. After all levels, if any point moved more than tol, repeat from k=1.
-        4. Stop when one sweep from 1 to max_level makes all levels converged (< tol movement).
-        """
+
 
         if self.fixed_point_index is None:
             messagebox.showinfo("Info", "Run CVT to determine central point first.")
