@@ -626,6 +626,22 @@ class VoronoiGenerator:
         final_level_polygons = self.get_neighborhood_polygons(self.fixed_point_index, max_levels)
         self.plot_radiant_voronoi(final_level_polygons)
 
+    def wrapped_centroid(self, poly_coords, width, height, ref_point=None):
+        coords = np.array(poly_coords)
+        if ref_point is None:
+            ref_point = coords[0]
+        # Defensive: Make sure ref_point is not an int
+        if isinstance(ref_point, (int, float)):
+            ref_point = coords[0]
+        x0, y0 = ref_point
+        x_shift = ((coords[:, 0] - x0 + width / 2.) % width) - width / 2.
+        y_shift = ((coords[:, 1] - y0 + height / 2.) % height) - height / 2.
+        x_unwrapped = x0 + x_shift
+        y_unwrapped = y0 + y_shift
+        centroid_x = np.mean(x_unwrapped) % width
+        centroid_y = np.mean(y_unwrapped) % height
+        return (centroid_x, centroid_y)
+
     def calculate_centroids(self):
         centroids = []
         bounding_box = Polygon([
@@ -646,8 +662,10 @@ class VoronoiGenerator:
             if clipped.is_empty:
                 centroids.append(self.points[i])
             else:
-                centroids.append((clipped.centroid.x, clipped.centroid.y))
-
+                coords = np.array(clipped.exterior.coords)
+                # Use the generator point as the reference point
+                centroid = self.wrapped_centroid(coords, self.width, self.height, ref_point=self.points[i])
+                centroids.append(centroid)
         return np.array(centroids)
 
     def show_original_points(self):
