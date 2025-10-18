@@ -233,7 +233,7 @@ class VoronoiGenerator:
 
         self.auto_running = True
         self.auto_lloyd_button.config(text="Stop CVT")
-        self.auto_tolerance = 1e-3
+        self.auto_tolerance = 1e-6
         self.run_auto_lloyd()
 
     def run_auto_lloyd(self):
@@ -246,7 +246,7 @@ class VoronoiGenerator:
 
         if self.auto_previous_points is not None:
             movement = np.linalg.norm(self.auto_previous_points - self.points)
-            if movement < self.auto_tolerance or self.iteration_count == 300:
+            if movement < self.auto_tolerance or self.iteration_count == 1000:
                 self.auto_running = False
                 self.auto_lloyd_button.config(text="Auto CVT")
                 self.select_most_central_point()

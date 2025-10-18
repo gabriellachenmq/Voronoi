@@ -233,7 +233,7 @@ class VoronoiGenerator:
 
         self.auto_running = True
         self.auto_lloyd_button.config(text="Stop CVT")
-        self.auto_tolerance = 1e-6
+        self.auto_tolerance = 1e-3
         self.run_auto_lloyd()
 
     def run_auto_lloyd(self):
@@ -366,31 +366,39 @@ class VoronoiGenerator:
             messagebox.showwarning("Warning", "Generate Voronoi first.")
             return
 
-        # Calculate max_levels dynamically
+        # Compute all centroids for each level polygon
         max_levels = self.calculate_max_levels(self.fixed_point_index)
-        level_polygons = self.get_neighborhood_polygons(self.fixed_point_index, max_levels+1)
-
+        level_polygons = self.get_neighborhood_polygons(self.fixed_point_index, max_levels + 1)
         if not level_polygons:
             return
 
-        # Rest of your radiant algorithm implementation...
+        # Lloyd centroids
         centroids = self.calculate_centroids()
         lloyd_centroid = centroids[self.fixed_point_index]
 
-        level_centroids = [poly.centroid for level, poly in level_polygons]
-        centroids_all = MultiPoint(level_centroids).centroid
+        # Gather all level centroids
+        level_centroids = np.array([poly.centroid.coords[0] for _, poly in level_polygons])
 
-        lambda_ = 0.5  # Adjust this for different blending
-        new_x = (1 - lambda_) * lloyd_centroid[0] + lambda_ * centroids_all.x
-        new_y = (1 - lambda_) * lloyd_centroid[1] + lambda_ * centroids_all.y
-        centroids[self.fixed_point_index] = (new_x, new_y)
+        # Include central point itself
+        center = np.array(self.points[self.fixed_point_index])
+        poly_points = np.vstack([level_centroids, center.reshape(1, 2)])
 
-        self.auto_previous_points = np.array(self.points)
-        self.points = centroids
+        # Form polygon A from all centroids + center
+        polygon_A = Polygon(poly_points)
+        if polygon_A.is_empty:
+            new_center = lloyd_centroid
+        else:
+            point_A = np.array([polygon_A.centroid.x, polygon_A.centroid.y])
+            # Update central point: 0.5 * A + 0.5 * Lloyd
+            new_center = 0.5 * point_A + 0.5 * lloyd_centroid
+
+        # Update the central point
+        self.points[self.fixed_point_index] = tuple(new_center)
         self.vor = Voronoi(self.add_periodic_ghosts(self.points))
         self.iteration_count += 1
         self.info_label.config(text=f"Iterations: {self.iteration_count}")
 
+        # Plot updated Voronoi
         self.plot_radiant_voronoi(level_polygons)
 
     def plot_radiant_voronoi(self, level_polygons):
