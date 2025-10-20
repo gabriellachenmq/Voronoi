@@ -233,7 +233,7 @@ class VoronoiGenerator:
 
         self.auto_running = True
         self.auto_lloyd_button.config(text="Stop CVT")
-        self.auto_tolerance = 1e-6
+        self.auto_tolerance = 1e-3
         self.run_auto_lloyd()
 
     def run_auto_lloyd(self):
@@ -373,7 +373,6 @@ class VoronoiGenerator:
         if not level_polygons:
             return
 
-        # Rest of your radiant algorithm implementation...
         centroids = self.calculate_centroids()
         lloyd_centroid = centroids[self.fixed_point_index]
 
@@ -392,6 +391,7 @@ class VoronoiGenerator:
         self.info_label.config(text=f"Iterations: {self.iteration_count}")
 
         self.plot_radiant_voronoi(level_polygons)
+        print("Centroids shape:", level_centroids)
 
     def plot_radiant_voronoi(self, level_polygons):
         self.ax.clear()

@@ -31,8 +31,8 @@ class VoronoiGenerator:
         self.main_frame = tk.Frame(self.root)
         self.main_frame.pack(fill=tk.BOTH, expand=True)
 
-        self.width = 600
-        self.height = 600
+        self.width = 1200
+        self.height = 1200
         self.click_canvas = tk.Canvas(self.main_frame, bg='white', width=self.width, height=self.width)
         self.click_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
@@ -361,51 +361,77 @@ class VoronoiGenerator:
         if self.fixed_point_index is None:
             messagebox.showwarning("Warning", "No central point. Run CVT first.")
             return
-
         if self.vor is None:
             messagebox.showwarning("Warning", "Generate Voronoi first.")
             return
 
-        # Compute all centroids for each level polygon
+        # ---- Step 1: gather centroids ----
+        centroids = self.calculate_centroids()
+        lloyd_centroid = np.array(centroids[self.fixed_point_index])
+
         max_levels = self.calculate_max_levels(self.fixed_point_index)
         level_polygons = self.get_neighborhood_polygons(self.fixed_point_index, max_levels + 1)
         if not level_polygons:
             return
 
-        # Lloyd centroids
-        centroids = self.calculate_centroids()
-        lloyd_centroid = centroids[self.fixed_point_index]
+        # compute true geometric centroids of polygons (ensure they are arrays)
+        level_centroids = []
+        for level, poly in level_polygons:
+            if hasattr(poly, "centroid"):
+                level_centroids.append([poly.centroid.x, poly.centroid.y])
+        level_centroids = np.array(level_centroids)  # <-- convert to NumPy array
 
-        # Gather all level centroids
-        level_centroids = np.array([poly.centroid.coords[0] for _, poly in level_polygons])
+        # ---- Step 2: build polygon A and compute its centroid ----
+        center = np.array(self.points[self.fixed_point_index]).reshape(1, 2)
+        poly_points = np.vstack([level_centroids, center])
 
-        # Include central point itself
-        center = np.array(self.points[self.fixed_point_index])
-        poly_points = np.vstack([level_centroids, center.reshape(1, 2)])
+        # order points by polar angle
+        center_mean = np.mean(poly_points, axis=0)
+        angles = np.arctan2(poly_points[:, 1] - center_mean[1],
+                            poly_points[:, 0] - center_mean[0])
+        ordered = poly_points[np.argsort(angles)]
 
-        # Form polygon A from all centroids + center
-        polygon_A = Polygon(poly_points)
-        if polygon_A.is_empty:
-            new_center = lloyd_centroid
-        else:
-            point_A = np.array([polygon_A.centroid.x, polygon_A.centroid.y])
-            # Update central point: 0.5 * A + 0.5 * Lloyd
-            new_center = 0.5 * point_A + 0.5 * lloyd_centroid
+        x, y = ordered[:, 0], ordered[:, 1]
+        x = np.append(x, x[0])
+        y = np.append(y, y[0])
 
-        # Update the central point
+        # polygon centroid (A)
+        A = 0.5 * np.sum(x[:-1] * y[1:] - x[1:] * y[:-1])
+        if np.isclose(A, 0):
+            A = 1e-9
+        Cx = np.sum((x[:-1] + x[1:]) * (x[:-1] * y[1:] - x[1:] * y[:-1])) / (6 * A)
+        Cy = np.sum((y[:-1] + y[1:]) * (x[:-1] * y[1:] - x[1:] * y[:-1])) / (6 * A)
+        A_centroid = np.array([Cx, Cy])
+
+        # ---- Step 3: move the center ----
+        new_center = 0.5 * A_centroid + 0.5 * lloyd_centroid
         self.points[self.fixed_point_index] = tuple(new_center)
         self.vor = Voronoi(self.add_periodic_ghosts(self.points))
         self.iteration_count += 1
         self.info_label.config(text=f"Iterations: {self.iteration_count}")
 
-        # Plot updated Voronoi
+        # ---- Step 4: redraw ----
+        self.ax.clear()
         self.plot_radiant_voronoi(level_polygons)
-        print("Centroids shape:", centroids.shape)
-        print("Sample centroids:", centroids[:5])
-        if len(centroids) > 0:
-            self.ax.scatter(centroids[:, 0], centroids[:, 1],
+
+        # plot centroids of level polygons (now array)
+        print("Centroids shape:", level_centroids)
+        if len(level_centroids) > 0:
+            self.ax.scatter(level_centroids[:, 0], level_centroids[:, 1],
                             s=100, color='dodgerblue', edgecolor='white',
-                            label='Level Centroids', zorder=10)
+                            label='Level Centroids', zorder=5)
+
+        # draw polygon A
+        self.ax.plot(ordered[:, 0], ordered[:, 1], 'm--', linewidth=2, label="Polygon A")
+        self.ax.plot([ordered[-1, 0], ordered[0, 0]],
+                     [ordered[-1, 1], ordered[0, 1]], 'm--')
+
+        # mark A centroid and new center
+        self.ax.plot(A_centroid[0], A_centroid[1], 'bs', markersize=8, label="A Centroid")
+        self.ax.plot(new_center[0], new_center[1], 'ro', markersize=6, label="Updated Center")
+
+        self.ax.legend(loc="best", fontsize=8)
+        self.canvas.draw()
 
     def plot_radiant_voronoi(self, level_polygons):
         self.ax.clear()
@@ -474,7 +500,7 @@ class VoronoiGenerator:
         self.ax.set_title(f"Radiant Algorithm (Iteration: {self.iteration_count})")
         self.ax.legend()
 
-        if self.canvas:f
+        if self.canvas:
             self.canvas.get_tk_widget().destroy()
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.click_canvas)
         self.canvas.draw()
