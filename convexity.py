@@ -23,7 +23,6 @@ for i in range(n):
 
 print("cross z values:", crosses)
 print("Any negative while others positive? ->", any(z < 0 for z in crosses) and any(z > 0 for z in crosses))
-# find indices of negative crosses (reflex at p_{i+1})
 neg_idx = [ (i+1)%n for i,z in enumerate(crosses) if z < 0 ]
 print("Reflex vertex indices (0-based):", neg_idx)
 for j in neg_idx:
