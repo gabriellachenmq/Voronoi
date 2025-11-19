@@ -329,31 +329,7 @@ class VoronoiGenerator:
 
         return True
 
-    def choose_new_center(self):
-        """Choose a new active center point that is not frozen."""
-        candidates = [i for i in range(len(self.points)) if i not in self.frozen_points]
-        if not candidates:
-            return None
 
-        # distance from frozen region
-        frozen_coords = np.array([self.points[i] for i in self.frozen_points]) \
-            if self.frozen_points else np.zeros((0, 2))
-
-        if len(frozen_coords) == 0:
-            # if nothing is frozen, choose the point farthest from current center
-            cx = np.array(self.points[self.fixed_point_index])
-            dists = [(np.linalg.norm(np.array(self.points[i]) - cx), i) for i in candidates]
-            return max(dists)[1]
-
-        dists = []
-        for i in candidates:
-            p = np.array(self.points[i])
-            d = np.min(np.linalg.norm(frozen_coords - p, axis=1))
-            dists.append((d, i))
-
-        # choose the candidate with maximum min-distance from all frozen points
-        _, idx = max(dists)
-        return idx
 
     def run_radiant_algorithm(self):
         if self.fixed_point_index is None:
@@ -444,16 +420,32 @@ class VoronoiGenerator:
 
         # --- NEW: check short neighborhood convergence (levels 1 & 2) ---
         level_polygons_short = self.get_neighborhood_polygons(self.fixed_point_index, 3)
+        # ---- If converged, freeze region and select new center ----
         if level_polygons_short and self.is_converged(level_polygons_short):
-            # freeze current center and choose a new one
+
+            # 1. Freeze current center + neighbor rings
+            neighbor_ring = self.get_k_level_neighbors(self.fixed_point_index, 2)
+            for idx in neighbor_ring:
+                self.frozen_points.add(idx)
+
+            # freeze the center as well
             self.frozen_points.add(self.fixed_point_index)
+
+            print(f"Freezing: {self.fixed_point_index} and neighbors {neighbor_ring}")
+
+            # 2. Choose a new center from existing points
             new_center = self.choose_new_center()
             if new_center is None:
-                messagebox.showinfo("Done", "All regions converged.")
+                messagebox.showinfo("Done", "Global convergence reached — no new center available.")
                 return
+
+            print(f"Switching center from {self.fixed_point_index} → {new_center}")
+
+            # 3. Update center
             self.fixed_point_index = new_center
-            # recompute short neighborhood for the new center
-            level_polygons_short = self.get_neighborhood_polygons(self.fixed_point_index, 3)
+
+            # IMPORTANT: do NOT continue with old iteration's movement
+            return  # stop here; next button press will update with new center
 
         # --- Normal hybrid step (using possibly new center) ---
         centroids = self.calculate_centroids()
