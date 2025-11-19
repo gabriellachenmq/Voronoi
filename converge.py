@@ -332,31 +332,28 @@ class VoronoiGenerator:
     def choose_new_center(self):
         """
         Choose a new active center point from unfrozen points.
-        Prefer points farthest from the current frozen region.
+        Prefer points *closest* to existing frozen region first (inside-out progression).
         """
-        # All point indices
         all_indices = set(range(len(self.points)))
-
-        # Candidate indices = points not yet frozen
         candidates = list(all_indices - self.frozen_points)
         if not candidates:
-            return None  # No available points
+            return None
 
+        # Case 1: no frozen points yet → start from the most central one (closest to domain center)
         if not self.frozen_points:
-            # If nothing is frozen, choose farthest from domain center
             cx, cy = self.width / 2, self.height / 2
             distances = [(i, (self.points[i][0] - cx) ** 2 + (self.points[i][1] - cy) ** 2) for i in candidates]
-            # Return index with max distance
-            return max(distances, key=lambda x: x[1])[0]
+            return min(distances, key=lambda x: x[1])[0]
 
-        # Otherwise, choose point farthest from any frozen point
+        # Case 2: choose the point *closest* to any currently frozen point
         frozen_coords = np.array([self.points[i] for i in self.frozen_points])
         best_idx = None
-        best_dist = -1
+        best_dist = float("inf")
+
         for i in candidates:
             p = np.array(self.points[i])
             dist = np.min(np.linalg.norm(frozen_coords - p, axis=1))
-            if dist > best_dist:
+            if dist < best_dist:
                 best_dist = dist
                 best_idx = i
 
