@@ -283,7 +283,7 @@ class VoronoiGenerator:
     #   Convergence Detection
     # -------------------------------
 
-    def polygon_is_hexagon(self, point_index, poly, eps=0.002):
+    def polygon_is_hexagon(self, point_index, poly, eps=2):
         """
         A polygon is considered 'hexagon-like' if its centroid
         barely moves between iterations (geometric stability test).
@@ -331,42 +331,36 @@ class VoronoiGenerator:
 
     def choose_new_center(self):
         """
-        Choose a new active center point from the graph nodes
-        (NOT from original generator points).
-        Avoid frozen nodes.
+        Choose a new active center point from unfrozen points.
+        Prefer points farthest from the current frozen region.
         """
-        # --- all existing points after iterations ---
-        all_nodes = list(self.graph.keys())
+        # All point indices
+        all_indices = set(range(len(self.points)))
 
-        # frozen coordinates
-        frozen_coords = np.array([node for node in self.frozen_points]) \
-            if self.frozen_points else np.zeros((0, 2))
-
-        # candidate nodes (exclude frozen)
-        candidates = [node for node in all_nodes if node not in self.frozen_points]
-
+        # Candidate indices = points not yet frozen
+        candidates = list(all_indices - self.frozen_points)
         if not candidates:
-            return None
+            return None  # No available points
 
-        # --- nothing frozen yet: choose farthest from current fixed point ---
-        if len(frozen_coords) == 0:
-            cx = np.array(self.active_point)
-            dists = [(np.linalg.norm(np.array(p) - cx), p) for p in candidates]
-            return max(dists)[1]
+        if not self.frozen_points:
+            # If nothing is frozen, choose farthest from domain center
+            cx, cy = self.width / 2, self.height / 2
+            distances = [(i, (self.points[i][0] - cx) ** 2 + (self.points[i][1] - cy) ** 2) for i in candidates]
+            # Return index with max distance
+            return max(distances, key=lambda x: x[1])[0]
 
-        # --- otherwise choose point farthest from the frozen region ---
-        best = None
-        best_d = -1
+        # Otherwise, choose point farthest from any frozen point
+        frozen_coords = np.array([self.points[i] for i in self.frozen_points])
+        best_idx = None
+        best_dist = -1
+        for i in candidates:
+            p = np.array(self.points[i])
+            dist = np.min(np.linalg.norm(frozen_coords - p, axis=1))
+            if dist > best_dist:
+                best_dist = dist
+                best_idx = i
 
-        for p in candidates:
-            p_arr = np.array(p)
-            d = np.min(np.linalg.norm(frozen_coords - p_arr, axis=1))
-
-            if d > best_d:
-                best_d = d
-                best = p
-
-        return best
+        return best_idx
 
     def run_radiant_algorithm(self):
         if self.fixed_point_index is None:
@@ -455,105 +449,57 @@ class VoronoiGenerator:
             messagebox.showwarning("Warning", "Generate Voronoi first.")
             return
 
-        # --- NEW: check short neighborhood convergence (levels 1 & 2) ---
+        # --- Step 1: Check convergence in local neighborhood ---
         level_polygons_short = self.get_neighborhood_polygons(self.fixed_point_index, 3)
-        # ---- If converged, freeze region and select new center ----
         if level_polygons_short and self.is_converged(level_polygons_short):
 
-            # 1. Freeze current center + neighbor rings
+            # Freeze current center + neighbors
             neighbor_ring = self.get_k_level_neighbors(self.fixed_point_index, 2)
-            for idx in neighbor_ring:
-                self.frozen_points.add(idx)
-
-            # freeze the center as well
+            self.frozen_points.update(neighbor_ring)
             self.frozen_points.add(self.fixed_point_index)
 
             print(f"Freezing: {self.fixed_point_index} and neighbors {neighbor_ring}")
 
-            # 2. Choose a new center from existing points
-            new_center = self.choose_new_center()
-            if new_center is None:
+            # Choose new center
+            new_center_idx = self.choose_new_center()
+            if new_center_idx is None:
                 messagebox.showinfo("Done", "Global convergence reached — no new center available.")
                 return
 
-            print(f"Switching center from {self.fixed_point_index} → {new_center}")
+            print(f"Switching center to point index {new_center_idx}")
+            self.fixed_point_index = new_center_idx
+            # Do not return here; we can continue moving points next iteration
 
-            # 3. Update center
-            self.fixed_point_index = new_center
-
-            # IMPORTANT: do NOT continue with old iteration's movement
-            return  # stop here; next button press will update with new center
-
-        # --- Normal hybrid step (using possibly new center) ---
+        # --- Step 2: Standard Radiant / Lloyd update ---
         centroids = self.calculate_centroids()
-        lloyd_centroid = np.array(centroids[self.fixed_point_index])
+        for i, centroid in enumerate(centroids):
+            if i in self.frozen_points:
+                continue  # Skip frozen points
+            self.points[i] = (centroid[0] % self.width, centroid[1] % self.height)
 
-        max_levels = self.calculate_max_levels(self.fixed_point_index)
-        level_polygons = self.get_neighborhood_polygons(self.fixed_point_index, max_levels + 1)
-        if not level_polygons:
-            return
+        # --- Optional: hybrid radiant step for active center ---
+        level_polygons = self.get_neighborhood_polygons(self.fixed_point_index, 2)
+        if level_polygons:
+            center = np.array(self.points[self.fixed_point_index])
+            # Blend centroid of polygon A with Lloyd centroid
+            polygon_pts = np.array([poly.centroid.coords[0] for lvl, poly in level_polygons])
+            A_centroid = polygon_pts.mean(axis=0)
+            new_center = 0.5 * centroids[self.fixed_point_index] + 0.5 * A_centroid
+            self.points[self.fixed_point_index] = new_center
 
-        # Build array of true geometric centroids for each level polygon
-        level_centroids = []
-        for lvl, poly in level_polygons:
-            if poly is None or poly.is_empty:
-                continue
-            c = poly.centroid
-            level_centroids.append([c.x, c.y])
-        if len(level_centroids) == 0:
-            return
-        level_centroids = np.array(level_centroids)
-
-        # Build polygon A from level centroids + center (center as row vector)
-        center = np.array(self.points[self.fixed_point_index]).reshape(1, 2)
-        poly_points = np.vstack([level_centroids, center])
-
-        # Order polygon A points by polar angle around their mean
-        center_mean = np.mean(poly_points, axis=0)
-        angles = np.arctan2(poly_points[:, 1] - center_mean[1],
-                            poly_points[:, 0] - center_mean[0])
-        ordered = poly_points[np.argsort(angles)]
-
-        # Shoelace centroid of polygon A (close polygon)
-        x, y = ordered[:, 0], ordered[:, 1]
-        x = np.append(x, x[0])
-        y = np.append(y, y[0])
-        A = 0.5 * np.sum(x[:-1] * y[1:] - x[1:] * y[:-1])
-        if np.isclose(A, 0):
-            A = 1e-9
-        Cx = np.sum((x[:-1] + x[1:]) * (x[:-1] * y[1:] - x[1:] * y[:-1])) / (6 * A)
-        Cy = np.sum((y[:-1] + y[1:]) * (x[:-1] * y[1:] - x[1:] * y[:-1])) / (6 * A)
-        A_centroid = np.array([Cx, Cy])
-
-        # New center: blend A-centroid and Lloyd centroid (0.5 / 0.5)
-        new_center = 0.5 * A_centroid + 0.5 * lloyd_centroid
-        self.points[self.fixed_point_index] = tuple(new_center)
-
-        # Recompute Voronoi and update counters
+        # --- Step 3: Update Voronoi ---
         self.vor = Voronoi(self.add_periodic_ghosts(self.points))
         self.iteration_count += 1
         self.info_label.config(text=f"Iterations: {self.iteration_count}")
 
-        # Draw everything: pass overlay data to plotting function
-        # level_polygons (shapely polygons), ordered polygon A points, level_centroids, A_centroid, new_center
-        self.plot_radiant_voronoi(level_polygons,
-                                  ordered=ordered,
-                                  level_centroids=level_centroids,
-                                  A_centroid=A_centroid,
-                                  new_center=new_center)
+        # --- Step 4: Draw updated Voronoi ---
+        level_polygons_plot = self.get_neighborhood_polygons(self.fixed_point_index, 3)
+        self.plot_radiant_voronoi(level_polygons_plot)
 
-    from matplotlib.patches import Polygon as MplPolygon
-    from shapely.geometry import Polygon as ShapelyPolygon, MultiPolygon
-
-    def plot_radiant_voronoi(self, level_polygons=None, ordered=None,
-                             level_centroids=None, A_centroid=None, new_center=None):
-        """
-        Draw Voronoi clipped to bounding box, color frozen generators gray,
-        and optionally overlay level polygons, centroids, polygon A (ordered), and markers.
-        """
+    def plot_radiant_voronoi(self, level_polygons):
         self.ax.clear()
 
-        # bounding box as shapely polygon for clipping
+        # Plot Voronoi cells
         bounding_box = Polygon([
             (self.bounds[0], self.bounds[2]),
             (self.bounds[1], self.bounds[2]),
@@ -561,95 +507,62 @@ class VoronoiGenerator:
             (self.bounds[0], self.bounds[3])
         ])
 
-        # Draw Voronoi cells for original points (indices 0..n-1)
-        n = len(self.points)
-        if self.vor is not None:
-            for i, region_index in enumerate(self.vor.point_region[:n]):
-                region = self.vor.regions[region_index]
-                if not region or -1 in region:
-                    continue
-                try:
-                    poly_coords = self.vor.vertices[region]
-                except Exception:
-                    continue
-                try:
-                    poly = ShapelyPolygon(poly_coords)
-                except Exception:
-                    continue
-                clipped = poly.intersection(bounding_box)
-                if clipped.is_empty:
-                    continue
+        for i, region_index in enumerate(self.vor.point_region[:len(self.points)]):
+            region = self.vor.regions[region_index]
+            if -1 in region or len(region) == 0:
+                continue
+            polygon = Polygon(self.vor.vertices[region])
+            clipped = polygon.intersection(bounding_box)
+            if clipped.is_empty:
+                continue
+            if isinstance(clipped, Polygon):
+                self.ax.fill(*clipped.exterior.xy, alpha=0.4)
+            elif isinstance(clipped, MultiPolygon):
+                for poly in clipped.geoms:
+                    self.ax.fill(*poly.exterior.xy, alpha=0.4)
 
-                # Fill frozen generators grey
-                if i in self.frozen_points:
-                    facecolor = "#cccccc"
-                else:
-                    facecolor = plt.cm.viridis(0.6)  # change as you like
+        # Plot central point
+        if self.fixed_point_index is not None:
+            self.ax.plot(self.points[self.fixed_point_index][0],
+                         self.points[self.fixed_point_index][1],
+                         'o', color='blue', markersize=8, label='Central Point')
 
-                # If clipped returns multipolygon, draw each piece
-                if isinstance(clipped, MultiPolygon):
-                    for piece in clipped.geoms:
-                        xs, ys = piece.exterior.xy
-                        patch = MplPolygon(list(zip(xs, ys)), closed=True,
-                                           facecolor=facecolor, edgecolor="k", alpha=0.6)
-                        self.ax.add_patch(patch)
-                else:
-                    xs, ys = clipped.exterior.xy
-                    patch = MplPolygon(list(zip(xs, ys)), closed=True,
-                                       facecolor=facecolor, edgecolor="k", alpha=0.6)
-                    self.ax.add_patch(patch)
+        safe_levels_exist = False
+        for level, poly in level_polygons:
+            neighbor_indices = self.get_k_level_neighbors(self.fixed_point_index, level)
+            if not any(self.is_boundary_point(i) for i in neighbor_indices):
+                safe_levels_exist = True
+                break
 
-        # Overlay level_polygons (thin outlines)
-        if level_polygons:
-            for level, poly in level_polygons:
-                if poly is None or poly.is_empty:
-                    continue
-                xs, ys = poly.exterior.xy
-                self.ax.plot(xs, ys, linestyle=':', linewidth=1.0, alpha=0.9)
+        max_level = max(level for level, _ in level_polygons) if level_polygons else 0  # 3
+        min_level = min(level for level, _ in level_polygons) if level_polygons else 0
 
-        # Plot level centroids as blue circles (on top)
-        if level_centroids is not None and len(level_centroids) > 0:
-            lc = np.array(level_centroids)
-            self.ax.scatter(lc[:, 0], lc[:, 1],
-                            s=80, color='dodgerblue', edgecolor='white',
-                            label='Level Centroids', zorder=20)
+        for level, poly in level_polygons:
+            neighbor_indices = self.get_k_level_neighbors(self.fixed_point_index, level)
 
-        # Draw polygon A if provided (ordered array of points)
-        if ordered is not None:
-            ord_pts = np.array(ordered)
-            self.ax.plot(ord_pts[:, 0], ord_pts[:, 1], 'm--', linewidth=2, zorder=25)
-            # close polygon
-            self.ax.plot([ord_pts[-1, 0], ord_pts[0, 0]],
-                         [ord_pts[-1, 1], ord_pts[0, 1]], 'm--', zorder=25)
+            if level == max_level and not any(self.is_boundary_point(i) for i in neighbor_indices):
+                self.ax.plot(*poly.exterior.xy, color='black',
+                             linewidth=2, linestyle='--',
+                             label=f'Level {level - 1} neighborhood')
+            elif level == min_level:
+                self.ax.plot(*poly.exterior.xy, color='green',
+                             linewidth=2, linestyle='--',
+                             label=f'Level {level - 1} neighborhood')
+            else:
+                self.ax.plot(*poly.exterior.xy, color='black',
+                             linewidth=1, linestyle=':',
+                             alpha=0.5)
 
-        # mark A centroid and new center if provided
-        if A_centroid is not None:
-            self.ax.plot(A_centroid[0], A_centroid[1], 'bs', markersize=8, label='A Centroid', zorder=30)
-        if new_center is not None:
-            self.ax.plot(new_center[0], new_center[1], 'ro', markersize=6, label='Updated Center', zorder=30)
-
-        # draw points (generators)
-        pts = np.array(self.points)
-        if len(pts) > 0:
-            self.ax.scatter(pts[:, 0], pts[:, 1], s=10, color='k', zorder=15)
-
-        # highlight current active center with red circle outline
-        if self.fixed_point_index is not None and 0 <= self.fixed_point_index < len(self.points):
-            cx, cy = self.points[self.fixed_point_index]
-            self.ax.scatter([cx], [cy], s=140, facecolors='none', edgecolors='red', linewidths=1.6, zorder=35,
-                            label='Active Center')
+        for i, point in enumerate(self.points):
+            if i == self.fixed_point_index:
+                continue
+            self.ax.plot(point[0], point[1], 'o', color='red', markersize=5)
 
         self.ax.set_xlim(self.bounds[0], self.bounds[1])
         self.ax.set_ylim(self.bounds[2], self.bounds[3])
-        self.ax.set_aspect('equal')
+        self.ax.set_title(f"Radiant Algorithm (Iteration: {self.iteration_count})")
+        self.ax.legend()
 
-        # draw legend only when there are artists
-        try:
-            self.ax.legend(loc='best', fontsize=8)
-        except Exception:
-            pass
-
-        # update canvas similar to your original function
         if self.canvas:
             self.canvas.get_tk_widget().destroy()
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.click_canvas)
