@@ -329,7 +329,44 @@ class VoronoiGenerator:
 
         return True
 
+    def choose_new_center(self):
+        """
+        Choose a new active center point from the graph nodes
+        (NOT from original generator points).
+        Avoid frozen nodes.
+        """
+        # --- all existing points after iterations ---
+        all_nodes = list(self.graph.keys())
 
+        # frozen coordinates
+        frozen_coords = np.array([node for node in self.frozen_points]) \
+            if self.frozen_points else np.zeros((0, 2))
+
+        # candidate nodes (exclude frozen)
+        candidates = [node for node in all_nodes if node not in self.frozen_points]
+
+        if not candidates:
+            return None
+
+        # --- nothing frozen yet: choose farthest from current fixed point ---
+        if len(frozen_coords) == 0:
+            cx = np.array(self.active_point)
+            dists = [(np.linalg.norm(np.array(p) - cx), p) for p in candidates]
+            return max(dists)[1]
+
+        # --- otherwise choose point farthest from the frozen region ---
+        best = None
+        best_d = -1
+
+        for p in candidates:
+            p_arr = np.array(p)
+            d = np.min(np.linalg.norm(frozen_coords - p_arr, axis=1))
+
+            if d > best_d:
+                best_d = d
+                best = p
+
+        return best
 
     def run_radiant_algorithm(self):
         if self.fixed_point_index is None:
