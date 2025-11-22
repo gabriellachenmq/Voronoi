@@ -127,26 +127,25 @@ class VoronoiGenerator:
             self.ax.clear()
 
     def add_periodic_ghosts(self, points):
-        """
-        For periodic CVT: Add ghost copies of all points translated by ±width and/or ±height,
-        so edges "wrap around". For a square domain, this means 8 translated copies + original.
-        """
         points = np.array(points)
-        tile_shifts = [
+        shifts = [
             (0, 0),
-            (self.width, 0),
-            (-self.width, 0),
-            (0, self.height),
-            (0, -self.height),
-            (self.width, self.height),
-            (self.width, -self.height),
-            (-self.width, self.height),
-            (-self.width, -self.height)
+            (self.width, 0), (-self.width, 0),
+            (0, self.height), (0, -self.height),
+            (self.width, self.height), (self.width, -self.height),
+            (-self.width, self.height), (-self.width, -self.height)
         ]
         all_points = []
-        for dx, dy in tile_shifts:
+        self.ghost_index_map = {}  # maps Voronoi index -> base index
+
+        base_N = len(points)
+        idx = 0
+        for s_i, (dx, dy) in enumerate(shifts):
             shifted = points + np.array([dx, dy])
-            all_points.append(shifted)
+            for j, pt in enumerate(shifted):
+                all_points.append(pt)
+                self.ghost_index_map[idx] = j  # j is the original index
+                idx += 1
         return np.vstack(all_points)
 
     def generate_voronoi(self):
@@ -476,15 +475,31 @@ class VoronoiGenerator:
                 continue  # Skip frozen points
             self.points[i] = (centroid[0] % self.width, centroid[1] % self.height)
 
-        # --- Optional: hybrid radiant step for active center ---
+        # --- Radiant step: build Polygon A from center, level1, level2 centroids ---
         level_polygons = self.get_neighborhood_polygons(self.fixed_point_index, 2)
         if level_polygons:
-            center = np.array(self.points[self.fixed_point_index])
-            # Blend centroid of polygon A with Lloyd centroid
-            polygon_pts = np.array([poly.centroid.coords[0] for lvl, poly in level_polygons])
-            A_centroid = polygon_pts.mean(axis=0)
-            new_center = 0.5 * centroids[self.fixed_point_index] + 0.5 * A_centroid
-            self.points[self.fixed_point_index] = new_center
+            center_pt = np.array(self.points[self.fixed_point_index])
+
+            # Find centroids of level1 and level2 polygons
+            lvl1_poly = next((poly for lvl, poly in level_polygons if lvl == 1), None)
+            lvl2_poly = next((poly for lvl, poly in level_polygons if lvl == 2), None)
+
+            if lvl1_poly is not None and lvl2_poly is not None:
+                c1 = np.array([lvl1_poly.centroid.x, lvl1_poly.centroid.y])
+                c2 = np.array([lvl2_poly.centroid.x, lvl2_poly.centroid.y])
+
+                # Build Polygon A from the 3 points
+                A_polygon = Polygon([center_pt, c1, c2])
+
+                # Compute its centroid
+                A_centroid = np.array([A_polygon.centroid.x, A_polygon.centroid.y])
+
+                # Blend with Lloyd centroid for smoother evolution
+                new_center = 0.5 * centroids[self.fixed_point_index] + 0.5 * A_centroid
+
+                # Wrap within the torus domain
+                new_center = np.array([new_center[0] % self.width, new_center[1] % self.height])
+                self.points[self.fixed_point_index] = new_center
 
         # --- Step 3: Update Voronoi ---
         self.vor = Voronoi(self.add_periodic_ghosts(self.points))
@@ -493,6 +508,8 @@ class VoronoiGenerator:
 
         # --- Step 4: Draw updated Voronoi ---
         level_polygons_plot = self.get_neighborhood_polygons(self.fixed_point_index, 3)
+
+
         self.plot_radiant_voronoi(level_polygons_plot)
 
     def plot_radiant_voronoi(self, level_polygons):
@@ -551,6 +568,7 @@ class VoronoiGenerator:
                 self.ax.plot(*poly.exterior.xy, color='black',
                              linewidth=1, linestyle=':',
                              alpha=0.5)
+            # Visualize Polygon A (triangle)
 
         for i, point in enumerate(self.points):
             if i == self.fixed_point_index:
@@ -620,10 +638,13 @@ class VoronoiGenerator:
     def get_voronoi_neighbors(self, idx):
         neighbors = set()
         for p1, p2 in self.vor.ridge_points:
-            if p1 == idx and p2 < len(self.points):
-                neighbors.add(p2)
-            elif p2 == idx and p1 < len(self.points):
-                neighbors.add(p1)
+            i1 = self.ghost_index_map.get(p1, None)
+            i2 = self.ghost_index_map.get(p2, None)
+            if i1 is not None and i2 is not None:
+                if i1 == idx:
+                    neighbors.add(i2)
+                elif i2 == idx:
+                    neighbors.add(i1)
         return list(neighbors)
 
     def progressive_radiant_central_outward(self, tol=1e-6, max_iters=200, lam=0.5):
