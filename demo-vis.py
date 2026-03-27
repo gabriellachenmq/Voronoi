@@ -72,7 +72,7 @@ def voronoi_derivative_demo(vertices):
 
 
 vertices = np.array([
-    1+2j,
+    1+3j,
     3+1j,
     2-2j,
     -1-1j,
