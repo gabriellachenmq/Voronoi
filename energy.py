@@ -2,9 +2,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.spatial import Voronoi
 
-# =============================================================================
-# TORUS VORONOI: Tile 3×3 copies to simulate periodic boundaries
-# =============================================================================
 
 def tile_points(pts, Lx, Ly):
     shifts = np.array([[dx, dy] for dx in [-Lx, 0, Lx] for dy in [-Ly, 0, Ly]])
@@ -18,16 +15,9 @@ def get_original_index_offset(N):
     return 4 * N
 
 
-# =============================================================================
-# POLYGON GEOMETRY HELPERS
-# =============================================================================
 
 def polygon_area_centroid(V):
-    """
-    Signed area and area-weighted centroid (true centroid) of a simple polygon.
-    V : (n,2) vertices in order (CCW or CW).
-    Returns (area, centroid). area is signed; centroid is geometric.
-    """
+
     x, y = V[:, 0], V[:, 1]
     x1, y1 = np.roll(x, -1), np.roll(y, -1)
     cross = x * y1 - x1 * y
@@ -39,10 +29,7 @@ def polygon_area_centroid(V):
     return A, np.array([Cx, Cy])
 
 def polygon_second_moment(V, p):
-    """
-    Compute ∫_polygon ||x - p||² dA  (the CVT energy contribution of one cell).
-    Uses triangulation from p.
-    """
+
     energy = 0.0
     n = len(V)
     for j in range(n):
