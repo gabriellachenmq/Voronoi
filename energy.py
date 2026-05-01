@@ -35,7 +35,6 @@ def polygon_second_moment(V, p):
     for j in range(n):
         a = V[j] - p
         b = V[(j + 1) % n] - p
-        # Signed triangle area (with apex p)
         tri_A = 0.5 * (a[0] * b[1] - a[1] * b[0])
         # ∫_T ||x-p||² dA = (|A|/6)(|a|² + |b|² + a·b) — but use signed A so
         # contributions cancel correctly for non-convex/orientation issues
@@ -234,8 +233,8 @@ if __name__ == '__main__':
     print("=" * 60)
 
     Lx, Ly = 10.0, 10.0
-    M = 40
-    SEED = 42
+    M = 50
+    SEED = 60
     EPS = 1e-5
     MAX_IT = 200
 
@@ -259,7 +258,6 @@ if __name__ == '__main__':
     plot_convergence_compare(err_d, err_l)
     plot_energy_compare(E_d, E_l)
 
-    # ---- Summary ----
     print("\n" + "=" * 60)
     print(f"  DIVI : {len(err_d):3d} iters,  final E = {E_d[-1]:.6f}")
     print(f"  Lloyd: {len(err_l):3d} iters,  final E = {E_l[-1]:.6f}")
