@@ -45,7 +45,10 @@ def get_original_index_offset(N):
     """The (0,0) copy sits at index 4 in our 3×3 tiling."""
     return 4 * N
 
-
+def torus_mean(coords, L):
+    angles = 2 * np.pi * coords / L
+    mean_angle = np.arctan2(np.sin(angles).mean(), np.cos(angles).mean())
+    return (mean_angle * L / (2*np.pi)) % L
 # =============================================================================
 # ALGORITHM: Differentiation-Induced Voronoi Iteration on a Torus
 # =============================================================================
@@ -224,7 +227,7 @@ if __name__ == '__main__':
     Lx, Ly = 10.0, 10.0
     M = 40
 
-    X, history, errors = divi_torus(m=M, Lx=Lx, Ly=Ly, eps=1e-5, max_iter=100, seed=42)
+    X, history, errors = divi_torus(m=M, Lx=Lx, Ly=Ly, eps=1e-5, max_iter=200, seed=42)
 
     visualize(history, errors, Lx, Ly)
     plot_trajectories_torus(history, Lx, Ly)
